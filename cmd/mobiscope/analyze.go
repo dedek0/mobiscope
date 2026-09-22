@@ -87,7 +87,7 @@ func newAnalyzeCmd() *cobra.Command {
 }
 
 func runTriage(c *cobra.Command, session *models.AnalysisSession, logger *slog.Logger, triageProvider string) error {
-	cfg, err := loadConfigWithFlags()
+	cfg, err := loadConfigWithFlags(c)
 	if err != nil {
 		return err
 	}

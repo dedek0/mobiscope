@@ -39,7 +39,7 @@ func newLLMHealthCmd() *cobra.Command {
 		Use:   "health",
 		Short: "Check LLM provider health",
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg, err := loadConfigWithFlags()
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}
@@ -93,7 +93,7 @@ func newLLMListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List models from providers",
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg, err := loadConfigWithFlags()
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}
@@ -157,7 +157,7 @@ func newLLMPullCmd() *cobra.Command {
 				providerName = "ollama"
 			}
 
-			cfg, err := loadConfigWithFlags()
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}
@@ -200,7 +200,7 @@ func newLLMDetectCmd() *cobra.Command {
 		Short: "Detect available LLM providers",
 		Long:  "Probe local endpoints and check env vars to discover available providers.",
 		RunE: func(c *cobra.Command, _ []string) error {
-			cfg, err := loadConfigWithFlags()
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}
@@ -244,8 +244,8 @@ func newLLMConfigCmd() *cobra.Command {
 		Use:   "config",
 		Short: "Show effective LLM configuration",
 		Long:  "Display the resolved provider/model for each task.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := loadConfigWithFlags()
+		RunE: func(c *cobra.Command, _ []string) error {
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}
@@ -285,7 +285,7 @@ func newLLMTestCmd() *cobra.Command {
 				taskName = "triage"
 			}
 
-			cfg, err := loadConfigWithFlags()
+			cfg, err := loadConfigWithFlags(c)
 			if err != nil {
 				return err
 			}

@@ -26,6 +26,7 @@ var (
 
 // GlobalFlags holds flags available on all commands.
 type GlobalFlags struct {
+	Config     string
 	Provider   string
 	AllowCloud bool
 }
@@ -51,11 +52,14 @@ func classifyExit(err error) int {
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mobiscope",
-		Short: "Static analysis harness for APK files",
-		Long:  "mobiscope orchestrates external tools and LLMs to analyze Android APKs.",
+		Use:           "mobiscope",
+		Short:         "Static analysis harness for APK files",
+		Long:          "mobiscope orchestrates external tools and LLMs to analyze Android APKs.",
+		SilenceUsage:  true,
+		SilenceErrors: false,
 	}
 
+	cmd.PersistentFlags().StringVar(&globalFlags.Config, "config", "", "Config file (TOML). Default: $MOBISCOPE_CONFIG or ./config.toml")
 	cmd.PersistentFlags().StringVar(&globalFlags.Provider, "provider", "", "Override LLM provider for all tasks")
 	cmd.PersistentFlags().BoolVar(&globalFlags.AllowCloud, "allow-cloud", false, "Allow cloud LLM providers")
 
@@ -75,14 +79,12 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// loadConfigWithFlags loads config and applies global flags.
-func loadConfigWithFlags() (*config.Config, error) {
-	cfg, err := config.Load(context.Background(), "")
-	if err != nil {
-		return nil, err
+// loadConfigWithFlags loads config with the standard precedence
+// (defaults < file < env < flags) and returns the effective configuration.
+func loadConfigWithFlags(cmd *cobra.Command) (*config.Config, error) {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if globalFlags.AllowCloud {
-		cfg.LLM.AllowCloud = true
-	}
-	return cfg, nil
+	return config.Load(ctx, globalFlags.Config, cmd.Flags())
 }
