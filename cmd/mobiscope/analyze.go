@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/dedek0/mobiscope/internal/analyzers"
 	"github.com/dedek0/mobiscope/internal/config"
@@ -24,6 +27,9 @@ func newAnalyzeCmd() *cobra.Command {
 		noRes          bool
 		triage         bool
 		triageProvider string
+		failFast       bool
+		dryRun         bool
+		maxConc        int
 	)
 
 	cmd := &cobra.Command{
@@ -41,9 +47,12 @@ func newAnalyzeCmd() *cobra.Command {
 			}
 			logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
+			ctx, stop := signal.NotifyContext(c.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
 			apkPath := args[0]
-			if _, err := os.Stat(apkPath); os.IsNotExist(err) {
-				return fmt.Errorf("APK not found: %s", apkPath)
+			if _, err := os.Stat(apkPath); err != nil {
+				return fmt.Errorf("APK not found: %s: %w", apkPath, err)
 			}
 
 			var stageFilter []string
@@ -56,12 +65,34 @@ func newAnalyzeCmd() *cobra.Command {
 				}
 			}
 
-			analyzersList := buildAnalyzers(stageFilter, noRes)
-			p := pipeline.New(analyzersList, logger)
+			opts := pipeline.Options{
+				MaxConcurrency: maxConc,
+				FailFast:       failFast,
+				DryRun:         dryRun,
+			}
+			if maxConc <= 0 {
+				if cfg, err := loadConfigWithFlags(c); err == nil {
+					opts.MaxConcurrency = cfg.Pipeline.MaxConcurrency
+					if !failFast {
+						opts.FailFast = cfg.Pipeline.FailFast
+					}
+				}
+			}
 
-			session, err := p.Run(c.Context(), apkPath, workdir, stageFilter)
+			analyzersList := buildAnalyzers(stageFilter, noRes)
+			p := pipeline.NewWithOptions(analyzersList, logger, opts)
+
+			session, err := p.Run(ctx, apkPath, workdir, stageFilter)
 			if err != nil {
 				return fmt.Errorf("pipeline failed: %w", err)
+			}
+
+			if dryRun {
+				fmt.Fprintf(os.Stderr, "Dry run: %d stage(s) would execute\n", len(session.ToolResults))
+				for _, tr := range session.ToolResults {
+					fmt.Fprintf(os.Stderr, "  - %s%s\n", tr.ToolName, tr.Error)
+				}
+				return nil
 			}
 
 			if triage {
@@ -79,7 +110,7 @@ func newAnalyzeCmd() *cobra.Command {
 			if triage {
 				fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
 			}
-			fmt.Fprintf(os.Stderr, "Artifacts: %s/%s/\n", workdir, session.ID[:16])
+			fmt.Fprintf(os.Stderr, "Artifacts: %s/%s/\n", workdir, session.ID)
 			return nil
 		},
 	}
@@ -91,6 +122,9 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noRes, "no-res", false, "Skip resource decoding")
 	cmd.Flags().BoolVar(&triage, "triage", false, "Run LLM triage on findings")
 	cmd.Flags().StringVar(&triageProvider, "triage-provider", "", "Override provider for triage")
+	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Abort on the first analyzer error")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "List the stages that would run without executing")
+	cmd.Flags().IntVar(&maxConc, "max-concurrency", 0, "Max external tools running at once (default from config)")
 
 	return cmd
 }
@@ -124,7 +158,13 @@ func runTriage(c *cobra.Command, session *models.AnalysisSession, logger *slog.L
 	}
 
 	cost := llm.NewCostAccumulator(logger)
-	triageEngine := llm.NewTriageEngine(router, cache, cost, llm.DefaultTriageConfig(), logger)
+	retry := llm.RetryConfig{
+		MaxRetries: cfg.LLM.MaxRetries,
+		BaseDelay:  time.Duration(cfg.LLM.RetryBaseDelayMS) * time.Millisecond,
+		MaxDelay:   8 * time.Second,
+	}
+	timeout := time.Duration(cfg.LLM.TimeoutSeconds) * time.Second
+	triageEngine := llm.NewTriageEngineWithRetry(router, cache, cost, llm.DefaultTriageConfig(), retry, timeout, logger)
 
 	if _, err = triageEngine.Triage(c.Context(), session.Findings, nil); err != nil {
 		return err
