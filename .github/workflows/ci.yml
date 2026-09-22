@@ -1,0 +1,105 @@
+name: ci
+
+on:
+  push:
+    branches: [main, test]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofumpt
+        run: |
+          go install mvdan.cc/gofumpt@latest
+          gofumpt -l .
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.1.6
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build image
+        run: docker build -t mobiscope:ci .
+
+      - name: smoke test toolchain
+        run: |
+          docker run --rm --entrypoint sh mobiscope:ci -c '
+            set -e
+            mobiscope version
+            gitleaks version
+            apktool --version
+            jadx --version
+            semgrep --version
+          '
+
+      - name: smoke test serve
+        run: |
+          docker run -d --name mobiscope-ci -p 127.0.0.1:18080:8080 mobiscope:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18080/healthz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/healthz
+          docker logs mobiscope-ci
+          docker rm -f mobiscope-ci
