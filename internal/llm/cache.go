@@ -63,14 +63,14 @@ func (c *Cache) Get(key string) *json.RawMessage {
 	return &raw
 }
 
-// Set stores a response in the cache.
-func (c *Cache) Set(key string, value interface{}) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Errorf("marshaling cache value: %w", err)
+// Set stores a raw JSON response in the cache. The value must be valid JSON;
+// non-JSON payloads are rejected so callers cannot poison the cache.
+func (c *Cache) Set(key string, value json.RawMessage) error {
+	if len(value) == 0 || !json.Valid(value) {
+		return fmt.Errorf("cache value is not valid JSON")
 	}
 	path := filepath.Join(c.dir, key+".json")
-	return os.WriteFile(path, data, 0o600)
+	return os.WriteFile(path, value, 0o600)
 }
 
 // Clear removes all cached entries.

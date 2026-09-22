@@ -29,7 +29,7 @@ func NewRegistry() *Registry {
 func (r *Registry) registerDefaults() {
 	defaults := []ModelInfo{
 		{
-			ID:            "qwen2.5-coder:7b",
+			ID:            ModelOllamaDefault,
 			Provider:      NameOllama,
 			DisplayName:   "Qwen 2.5 Coder 7B",
 			ContextWindow: 32768,
@@ -54,7 +54,7 @@ func (r *Registry) registerDefaults() {
 			Capabilities:  Capabilities{JSONMode: true, Streaming: true, ToolCalling: true, Vision: true},
 		},
 		{
-			ID:            "gpt-4o-mini",
+			ID:            ModelOpenAIDefault,
 			Provider:      NameOpenAI,
 			DisplayName:   "GPT-4o Mini",
 			ContextWindow: 128000,
@@ -72,7 +72,7 @@ func (r *Registry) registerDefaults() {
 			Capabilities:  Capabilities{JSONMode: true, Streaming: true, ToolCalling: true, Vision: true},
 		},
 		{
-			ID:            "gemini-2.0-flash",
+			ID:            ModelGeminiDefault,
 			Provider:      NameGemini,
 			DisplayName:   "Gemini 2.0 Flash",
 			ContextWindow: 1048576,

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,13 +27,26 @@ func TestCache_SetAndGet(t *testing.T) {
 	cache := NewCacheInDir(dir, time.Hour)
 
 	key := CacheKey("test", "model", "prompt", 0)
-	value := "test response"
+	value := json.RawMessage(`{"test":"response"}`)
 
 	require.NoError(t, cache.Set(key, value))
 
 	raw := cache.Get(key)
 	require.NotNil(t, raw)
-	assert.Contains(t, string(*raw), "test response")
+	assert.Contains(t, string(*raw), "response")
+}
+
+func TestCache_SetRejectsInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	cache := NewCacheInDir(dir, time.Hour)
+
+	err := cache.Set("k", json.RawMessage(`not json`))
+	require.Error(t, err)
+
+	err = cache.Set("k", json.RawMessage(``))
+	require.Error(t, err)
+
+	assert.Nil(t, cache.Get("k"))
 }
 
 func TestCache_Miss(t *testing.T) {
@@ -48,7 +62,7 @@ func TestCache_Expiry(t *testing.T) {
 	cache := NewCacheInDir(dir, time.Millisecond)
 
 	key := CacheKey("test", "model", "prompt", 0)
-	require.NoError(t, cache.Set(key, "value"))
+	require.NoError(t, cache.Set(key, json.RawMessage(`"value"`)))
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -60,8 +74,8 @@ func TestCache_Clear(t *testing.T) {
 	dir := t.TempDir()
 	cache := NewCacheInDir(dir, time.Hour)
 
-	require.NoError(t, cache.Set("k1", "v1"))
-	require.NoError(t, cache.Set("k2", "v2"))
+	require.NoError(t, cache.Set("k1", json.RawMessage(`"v1"`)))
+	require.NoError(t, cache.Set("k2", json.RawMessage(`"v2"`)))
 
 	require.NoError(t, cache.Clear())
 	assert.Nil(t, cache.Get("k1"))
@@ -73,7 +87,7 @@ func TestCache_ZeroTTL(t *testing.T) {
 	cache := NewCacheInDir(dir, 0) // no expiry
 
 	key := CacheKey("test", "model", "prompt", 0)
-	require.NoError(t, cache.Set(key, "value"))
+	require.NoError(t, cache.Set(key, json.RawMessage(`"value"`)))
 
 	raw := cache.Get(key)
 	assert.NotNil(t, raw)

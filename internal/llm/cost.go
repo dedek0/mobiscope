@@ -17,22 +17,24 @@ type PriceEntry struct {
 // PriceTable maps model names to their pricing.
 var PriceTable = map[string]PriceEntry{
 	// OpenAI
-	"gpt-4o":        {Per1KInput: 0.0025, Per1KOutput: 0.01},
-	"gpt-4o-mini":   {Per1KInput: 0.00015, Per1KOutput: 0.0006},
-	"gpt-4-turbo":   {Per1KInput: 0.01, Per1KOutput: 0.03},
-	"gpt-3.5-turbo": {Per1KInput: 0.0005, Per1KOutput: 0.0015},
+	"gpt-4o":           {Per1KInput: 0.0025, Per1KOutput: 0.01},
+	ModelOpenAIDefault: {Per1KInput: 0.00015, Per1KOutput: 0.0006},
+	"gpt-4-turbo":      {Per1KInput: 0.01, Per1KOutput: 0.03},
+	"gpt-3.5-turbo":    {Per1KInput: 0.0005, Per1KOutput: 0.0015},
 	// Anthropic
+	"claude-sonnet-4":            {Per1KInput: 0.003, Per1KOutput: 0.015},
 	"claude-sonnet-4-20250514":   {Per1KInput: 0.003, Per1KOutput: 0.015},
 	"claude-3-5-sonnet-20241022": {Per1KInput: 0.003, Per1KOutput: 0.015},
 	"claude-3-5-haiku-20241022":  {Per1KInput: 0.001, Per1KOutput: 0.005},
+	"claude-haiku-4-20250514":    {Per1KInput: 0.001, Per1KOutput: 0.005},
 	"claude-3-opus-20240229":     {Per1KInput: 0.015, Per1KOutput: 0.075},
 	// Google
-	"gemini-2.0-flash": {Per1KInput: 0.0001, Per1KOutput: 0.0004},
+	ModelGeminiDefault: {Per1KInput: 0.0001, Per1KOutput: 0.0004},
 	"gemini-1.5-pro":   {Per1KInput: 0.00125, Per1KOutput: 0.005},
 	// Groq
 	"llama-3.1-8b-instant": {Per1KInput: 0.00005, Per1KOutput: 0.00008},
 	// Local models: $0
-	"qwen2.5-coder:7b": {Per1KInput: 0, Per1KOutput: 0},
+	ModelOllamaDefault: {Per1KInput: 0, Per1KOutput: 0},
 	"llama3.1:8b":      {Per1KInput: 0, Per1KOutput: 0},
 }
 

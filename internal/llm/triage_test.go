@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -300,4 +301,51 @@ func TestTriageEngine_CancelledContext(t *testing.T) {
 	_, err := engine.Triage(ctx, findings, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cancelled")
+}
+
+func TestTriage_SurfacesPolicyError(t *testing.T) {
+	providers := map[string]Provider{}
+	cfg := config.LLMConfig{
+		DefaultProvider: "ghost",
+		Tasks: map[string]config.Task{
+			"triage": {Provider: "ghost", Model: "m"},
+		},
+		AllowCloud: false,
+	}
+	router := NewRouter(providers, cfg, triageTestLogger())
+	engine := NewTriageEngine(router, nil, nil, DefaultTriageConfig(), triageTestLogger())
+
+	findings := []models.Finding{{ID: "f1", NeedsLLMTriage: true, Category: models.CategoryCodePattern}}
+	_, err := engine.Triage(context.Background(), findings, nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrProviderUnavailable) || errors.Is(err, ErrCloudNotAllowed))
+	assert.Equal(t, models.VerdictInconclusive, findings[0].LLMVerdict)
+}
+
+func TestTriage_CostRecordedOnFinding(t *testing.T) {
+	mock := newTriageMockProvider("confirmed")
+	// Give the mock a priced model name.
+	providers := map[string]Provider{"mock": mock}
+	cfg := config.LLMConfig{
+		DefaultProvider: "mock",
+		Tasks: map[string]config.Task{
+			"triage": {Provider: "mock", Model: "gpt-4o-mini"},
+		},
+	}
+	router := NewRouter(providers, cfg, triageTestLogger())
+	engine := NewTriageEngine(router, nil, nil, DefaultTriageConfig(), triageTestLogger())
+
+	// Seed usage so EstimateCost is non-zero.
+	mock.chatFunc = func(_ context.Context, req llmtypes.ChatRequest) (*llmtypes.ChatResponse, error) {
+		return &llmtypes.ChatResponse{
+			Content: `{"verdict":"confirmed","confidence":0.9,"explanation":"x","remediation":"y"}`,
+			Model:   req.Model,
+			Usage:   llmtypes.Usage{PromptTokens: 1000, CompletionTokens: 1000, TotalTokens: 2000},
+		}, nil
+	}
+
+	findings := []models.Finding{{ID: "f1", NeedsLLMTriage: true, Category: models.CategoryCodePattern}}
+	_, err := engine.Triage(context.Background(), findings, nil)
+	require.NoError(t, err)
+	assert.Greater(t, findings[0].LLMCostUSD, 0.0)
 }

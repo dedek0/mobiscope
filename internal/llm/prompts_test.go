@@ -123,3 +123,10 @@ func TestExtractJSONFromText_Invalid(t *testing.T) {
 	_, err := extractJSONFromText(text)
 	assert.Error(t, err)
 }
+
+func TestExtractCodeContext_OutOfRange(t *testing.T) {
+	source := "line1\nline2\nline3"
+	assert.Equal(t, "", ExtractCodeContext(source, 99, 2))
+	assert.Equal(t, "", ExtractCodeContext(source, 0, 2))
+	assert.Equal(t, "", ExtractCodeContext(source, -1, 2))
+}

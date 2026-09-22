@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"github.com/dedek0/mobiscope/internal/config"
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
@@ -146,24 +147,35 @@ func (r *Router) defaultModel(providerName string) string {
 	if taskCfg, ok := r.cfg.Tasks["triage"]; ok && taskCfg.Provider == providerName {
 		return taskCfg.Model
 	}
-	for _, t := range r.cfg.Tasks {
-		if t.Provider == providerName {
-			return t.Model
+	// Deterministic order so runs are reproducible across map iterations.
+	names := make([]string, 0, len(r.cfg.Tasks))
+	for name := range r.cfg.Tasks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if r.cfg.Tasks[name].Provider == providerName {
+			return r.cfg.Tasks[name].Model
 		}
 	}
-	return ""
+	return providerDefaultModel(providerName)
 }
 
-// RouteStrict is like Route but returns ErrCloudNotAllowed when cloud is blocked
-// instead of falling back silently.
-func (r *Router) RouteStrict(ctx context.Context, task llmtypes.TaskType, containsSecret bool) (*RouteResult, error) {
-	result, err := r.Route(ctx, task, containsSecret)
-	if err != nil {
-		if errors.Is(err, ErrCloudNotAllowed) {
-			return nil, err
-		}
+// providerDefaultModel returns a sensible model name when no task config
+// mentions the provider (common with auto-detect fallbacks).
+func providerDefaultModel(name string) string {
+	switch name {
+	case NameOllama:
+		return ModelOllamaDefault
+	case NameOpenAI:
+		return ModelOpenAIDefault
+	case NameAnthropic:
+		return "claude-sonnet-4-20250514"
+	case NameGemini:
+		return ModelGeminiDefault
+	default:
+		return ""
 	}
-	return result, err
 }
 
 // Providers returns all configured providers.

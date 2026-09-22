@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -56,10 +57,21 @@ type TriageResponse struct {
 	Remediation string  `json:"remediation"`
 }
 
+// extractJSONRe matches a fenced ```json block.
+var extractJSONRe = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
+
+// extractJSONLooseRe matches a raw JSON object containing a verdict key.
+var extractJSONLooseRe = regexp.MustCompile(`(?s)\{[^{}]*"verdict"[^{}]*\}`)
+
 // Triage processes a batch of findings, enriching each with LLM verdicts.
 // Only findings with NeedsLLMTriage=true are processed.
+//
+// Per-finding failures mark the finding inconclusive but do not abort the
+// batch. Policy violations (cloud blocked, provider unavailable) are
+// accumulated and returned so callers can map them to exit code 4.
 func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, codeContext map[string]string) (int, error) {
 	processed := 0
+	var policyErr error
 
 	for i := range findings {
 		if !findings[i].NeedsLLMTriage {
@@ -74,6 +86,11 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 		route, err := te.router.Route(ctx, llmtypes.TaskTriage, containsSecret)
 		if err != nil {
 			te.logger.Error("routing failed for finding", "id", findings[i].ID, "error", err)
+			if errors.Is(err, ErrCloudNotAllowed) || errors.Is(err, ErrProviderUnavailable) {
+				if policyErr == nil {
+					policyErr = err
+				}
+			}
 			findings[i].LLMVerdict = models.VerdictInconclusive
 			findings[i].LLMExplanation = fmt.Sprintf("routing failed: %s", err)
 			continue
@@ -81,6 +98,11 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 
 		if err := te.triageOne(ctx, &findings[i], route, codeContext); err != nil {
 			te.logger.Error("triage failed for finding", "id", findings[i].ID, "error", err)
+			if errors.Is(err, ErrCloudNotAllowed) || errors.Is(err, ErrProviderUnavailable) {
+				if policyErr == nil {
+					policyErr = err
+				}
+			}
 			findings[i].LLMVerdict = models.VerdictInconclusive
 			findings[i].LLMExplanation = fmt.Sprintf("triage error: %s", err)
 		}
@@ -94,7 +116,7 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 		)
 	}
 
-	return processed, nil
+	return processed, policyErr
 }
 
 func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route *RouteResult, codeContext map[string]string) error {
@@ -133,7 +155,7 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 	if te.cache != nil {
 		if cached := te.cache.Get(cacheKey); cached != nil {
 			te.logger.Debug("cache hit", "finding", f.ID)
-			return te.applyResponse(f, route, *cached)
+			return te.applyResponse(f, route, *cached, llmtypes.Usage{})
 		}
 	}
 
@@ -165,10 +187,10 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 		}
 	}
 
-	return te.applyResponse(f, route, raw)
+	return te.applyResponse(f, route, raw, resp.Usage)
 }
 
-func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw json.RawMessage) error {
+func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw json.RawMessage, usage llmtypes.Usage) error {
 	var triageResp TriageResponse
 	if err := json.Unmarshal(raw, &triageResp); err != nil {
 		// Tolerant parse: try to extract JSON from text.
@@ -202,27 +224,21 @@ func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw
 	f.LLMExplanation = triageResp.Explanation
 	f.LLMRemediation = triageResp.Remediation
 
-	// Calculate cost for this finding.
-	cost := EstimateCost(route.Model, llmtypes.Usage{})
-	f.LLMCostUSD = cost
+	f.LLMCostUSD = EstimateCost(route.Model, usage)
 
 	return nil
 }
 
 // extractJSONFromText tries to find and parse a JSON object in text.
 func extractJSONFromText(text string) (TriageResponse, error) {
-	// Try to find a JSON block in markdown code fence.
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
-	if matches := re.FindStringSubmatch(text); len(matches) > 1 {
+	if matches := extractJSONRe.FindStringSubmatch(text); len(matches) > 1 {
 		var resp TriageResponse
 		if err := json.Unmarshal([]byte(matches[1]), &resp); err == nil {
 			return resp, nil
 		}
 	}
 
-	// Try to find raw JSON object.
-	re2 := regexp.MustCompile(`(?s)\{[^{}]*"verdict"[^{}]*\}`)
-	if match := re2.FindString(text); match != "" {
+	if match := extractJSONLooseRe.FindString(text); match != "" {
 		var resp TriageResponse
 		if err := json.Unmarshal([]byte(match), &resp); err == nil {
 			return resp, nil
@@ -240,11 +256,11 @@ func minInt(a, b int) int {
 }
 
 // ExtractCodeContext extracts a window of lines around the finding location.
-// This is a helper for callers that need to prepare the codeContext map.
+// Returns an empty string when line is out of range (never the entire source).
 func ExtractCodeContext(source string, line, contextLines int) string {
 	lines := strings.Split(source, "\n")
 	if line <= 0 || line > len(lines) {
-		return source
+		return ""
 	}
 
 	start := line - contextLines - 1
