@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,14 +42,38 @@ type CommandRunner interface {
 // DefaultCommandRunner executes real commands.
 type DefaultCommandRunner struct{}
 
+// allowedBinaries is the set of external tools the command runner will
+// execute. Anything else is rejected so a PATH hijack cannot run arbitrary
+// binaries through the analyzer pipeline.
+var allowedBinaries = map[string]struct{}{
+	apktoolBinary:  {},
+	jadxBinary:     {},
+	gitleaksBinary: {},
+	semgrepBinary:  {},
+	"java":         {},
+	"apksigner":    {},
+}
+
+// ErrBinaryNotAllowed is returned when a command name is not on the allowlist.
+var ErrBinaryNotAllowed = errors.New("binary not in allowlist")
+
+func isAllowedBinary(name string) bool {
+	base := filepath.Base(name)
+	_, ok := allowedBinaries[base]
+	return ok
+}
+
 func (r *DefaultCommandRunner) Run(ctx context.Context, name string, args []string, timeout time.Duration, env []string) (*CommandResult, error) {
+	if !isAllowedBinary(name) {
+		return nil, fmt.Errorf("%w: %s", ErrBinaryNotAllowed, name)
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: name is checked against allowBinaries above
 	if len(env) > 0 {
 		cmd.Env = append(cmd.Environ(), env...)
 	}

@@ -27,7 +27,7 @@ func NewSemgrepWithRunner(rulesPath string, runner CommandRunner) *Semgrep {
 	return &Semgrep{runner: runner, rules: rulesPath}
 }
 
-func (s *Semgrep) Name() string     { return "semgrep" }
+func (s *Semgrep) Name() string     { return semgrepBinary }
 func (s *Semgrep) Available() error { return CheckBinary(semgrepBinary) }
 
 func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (models.ToolResult, error) {

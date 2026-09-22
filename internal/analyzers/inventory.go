@@ -20,6 +20,10 @@ const (
 	AndroidManifestFile = "AndroidManifest.xml"
 	// NetworkSecurityConfigFile is the default NSC resource path.
 	NetworkSecurityConfigFile = "res/xml/network_security_config.xml"
+
+	// maxScanFileSize caps per-file reads during pattern scanning so one huge
+	// generated file cannot exhaust memory.
+	maxScanFileSize = 2 << 20
 )
 
 type Inventory struct{}
@@ -312,9 +316,19 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 		if err != nil || d.IsDir() {
 			return nil
 		}
+		// Never follow symlinks: a malicious APK can plant a link to a host
+		// file and exfiltrate it into findings and LLM prompts.
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext != ".java" && ext != ".smali" && ext != ".xml" && ext != ".kt" && ext != ".json" && ext != ".properties" && ext != ".cfg" {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err == nil && info.Size() > maxScanFileSize {
 			return nil
 		}
 
