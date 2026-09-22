@@ -22,6 +22,11 @@ type Preset struct {
 	DefaultModel string
 }
 
+const (
+	defaultLocalBaseURL = "http://localhost:8080/v1"
+	defaultModelName    = "default"
+)
+
 // Presets maps provider names to their default configurations.
 var Presets = map[string]Preset{
 	"openai": {
@@ -33,31 +38,31 @@ var Presets = map[string]Preset{
 	},
 	"llamacpp": {
 		DisplayName:  "llama.cpp",
-		BaseURL:      "http://localhost:8080/v1",
+		BaseURL:      defaultLocalBaseURL,
 		NeedsKey:     false,
 		IsLocal:      true,
-		DefaultModel: "default",
+		DefaultModel: defaultModelName,
 	},
 	"lmstudio": {
 		DisplayName:  "LM Studio",
 		BaseURL:      "http://localhost:1234/v1",
 		NeedsKey:     false,
 		IsLocal:      true,
-		DefaultModel: "default",
+		DefaultModel: defaultModelName,
 	},
 	"vllm": {
 		DisplayName:  "vLLM",
 		BaseURL:      "http://localhost:8000/v1",
 		NeedsKey:     false,
 		IsLocal:      true,
-		DefaultModel: "default",
+		DefaultModel: defaultModelName,
 	},
 	"localai": {
 		DisplayName:  "LocalAI",
-		BaseURL:      "http://localhost:8080/v1",
+		BaseURL:      defaultLocalBaseURL,
 		NeedsKey:     false,
 		IsLocal:      true,
-		DefaultModel: "default",
+		DefaultModel: defaultModelName,
 	},
 	"openrouter": {
 		DisplayName:  "OpenRouter",

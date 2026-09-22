@@ -13,11 +13,20 @@ import (
 	"github.com/dedek0/mobiscope/internal/models"
 )
 
+const (
+	// NameInventory is the tool identifier for the built-in inventory analyzer.
+	NameInventory = "inventory"
+	// AndroidManifestFile is the standard decoded manifest path.
+	AndroidManifestFile = "AndroidManifest.xml"
+	// NetworkSecurityConfigFile is the default NSC resource path.
+	NetworkSecurityConfigFile = "res/xml/network_security_config.xml"
+)
+
 type Inventory struct{}
 
 func NewInventory() *Inventory { return &Inventory{} }
 
-func (inv *Inventory) Name() string     { return "inventory" }
+func (inv *Inventory) Name() string     { return NameInventory }
 func (inv *Inventory) Available() error { return nil }
 func (inv *Inventory) Run(_ context.Context, _ string, workdir string) (models.ToolResult, error) {
 	start := time.Now()
@@ -32,7 +41,7 @@ func (inv *Inventory) Run(_ context.Context, _ string, workdir string) (models.T
 		jadxDir = workdir
 	}
 
-	var findings []models.Finding
+	findings := make([]models.Finding, 0, 16)
 
 	findings = append(findings, inv.analyzeManifest(jadxDir, "")...)
 	findings = append(findings, inv.analyzeNetworkSecurityConfig(jadxDir, "")...)
@@ -50,7 +59,7 @@ func (inv *Inventory) Analyze(workdir string, sessionID string) []models.Finding
 		jadxDir = workdir
 	}
 
-	var findings []models.Finding
+	findings := make([]models.Finding, 0, 16)
 	findings = append(findings, inv.analyzeManifest(jadxDir, sessionID)...)
 	findings = append(findings, inv.analyzeNetworkSecurityConfig(jadxDir, sessionID)...)
 	findings = append(findings, inv.scanPatterns(jadxDir, sessionID)...)
@@ -66,7 +75,7 @@ var (
 )
 
 func (inv *Inventory) analyzeManifest(dir string, sessionID string) []models.Finding {
-	manifestPath := filepath.Join(dir, "AndroidManifest.xml")
+	manifestPath := filepath.Join(dir, AndroidManifestFile)
 	data, err := os.ReadFile(manifestPath) //nolint:gosec
 	if err != nil {
 		return nil
@@ -77,14 +86,14 @@ func (inv *Inventory) analyzeManifest(dir string, sessionID string) []models.Fin
 
 	if debuggableRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID("inventory", models.CategoryManifestIssue, "AndroidManifest.xml", 1, "debuggable=true"),
+			ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, 1, "debuggable=true"),
 			SessionID:   sessionID,
-			SourceTool:  "inventory",
+			SourceTool:  NameInventory,
 			Category:    models.CategoryManifestIssue,
 			Title:       "Application is debuggable",
 			Description: "android:debuggable=true allows debugging and inspection of the app.",
 			Evidence:    "android:debuggable=\"true\"",
-			Location:    models.Location{File: "AndroidManifest.xml", Line: 1, Snippet: "android:debuggable=\"true\""},
+			Location:    models.Location{File: AndroidManifestFile, Line: 1, Snippet: "android:debuggable=\"true\""},
 			Severity:    models.SeverityHigh,
 			Sensitivity: models.SensitivityConfidential,
 			Confidence:  1.0,
@@ -95,14 +104,14 @@ func (inv *Inventory) analyzeManifest(dir string, sessionID string) []models.Fin
 		line := countLines(content[:m[0]])
 		snippet := content[m[0]:minInt(m[1]+40, len(content))]
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID("inventory", models.CategoryManifestIssue, "AndroidManifest.xml", line, snippet),
+			ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, line, snippet),
 			SessionID:   sessionID,
-			SourceTool:  "inventory",
+			SourceTool:  NameInventory,
 			Category:    models.CategoryManifestIssue,
 			Title:       "Exported component detected",
 			Description: "Component with android:exported=true can be invoked by other applications.",
 			Evidence:    snippet,
-			Location:    models.Location{File: "AndroidManifest.xml", Line: line, Snippet: snippet},
+			Location:    models.Location{File: AndroidManifestFile, Line: line, Snippet: snippet},
 			Severity:    models.SeverityMedium,
 			Sensitivity: models.SensitivityInternal,
 			Confidence:  0.9,
@@ -114,14 +123,14 @@ func (inv *Inventory) analyzeManifest(dir string, sessionID string) []models.Fin
 		line := countLines(content[:m[0]])
 		if isDangerousPermission(perm) {
 			findings = append(findings, models.Finding{
-				ID:          models.GenerateID("inventory", models.CategoryManifestIssue, "AndroidManifest.xml", line, perm),
+				ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, line, perm),
 				SessionID:   sessionID,
-				SourceTool:  "inventory",
+				SourceTool:  NameInventory,
 				Category:    models.CategoryManifestIssue,
 				Title:       fmt.Sprintf("Dangerous permission: %s", perm),
 				Description: fmt.Sprintf("The app requests dangerous permission %s.", perm),
 				Evidence:    perm,
-				Location:    models.Location{File: "AndroidManifest.xml", Line: line, Snippet: perm},
+				Location:    models.Location{File: AndroidManifestFile, Line: line, Snippet: perm},
 				Severity:    models.SeverityMedium,
 				Sensitivity: models.SensitivityInternal,
 				Confidence:  0.8,
@@ -173,14 +182,14 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if cleartextRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID("inventory", models.CategoryNetworkConfig, nscPath, 1, "cleartext=true"),
+			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, nscPath, 1, "cleartext=true"),
 			SessionID:   sessionID,
-			SourceTool:  "inventory",
+			SourceTool:  NameInventory,
 			Category:    models.CategoryNetworkConfig,
 			Title:       "Cleartext traffic permitted",
 			Description: "The network security config allows cleartext (HTTP) traffic.",
 			Evidence:    "cleartextTrafficPermitted=\"true\"",
-			Location:    models.Location{File: "res/xml/network_security_config.xml", Line: 1, Snippet: "cleartextTrafficPermitted=\"true\""},
+			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "cleartextTrafficPermitted=\"true\""},
 			Severity:    models.SeverityHigh,
 			Sensitivity: models.SensitivityConfidential,
 			Confidence:  1.0,
@@ -189,14 +198,14 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if trustAnchorRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID("inventory", models.CategoryNetworkConfig, nscPath, 1, "trust-anchors"),
+			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, nscPath, 1, "trust-anchors"),
 			SessionID:   sessionID,
-			SourceTool:  "inventory",
+			SourceTool:  NameInventory,
 			Category:    models.CategoryNetworkConfig,
 			Title:       "Custom trust anchors configured",
 			Description: "Custom trust anchors may weaken TLS validation if misconfigured.",
 			Evidence:    "<trust-anchors>",
-			Location:    models.Location{File: "res/xml/network_security_config.xml", Line: 1, Snippet: "<trust-anchors>"},
+			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "<trust-anchors>"},
 			Severity:    models.SeverityMedium,
 			Sensitivity: models.SensitivityInternal,
 			Confidence:  0.7,
@@ -205,14 +214,14 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if certPinRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID("inventory", models.CategoryPinningIndicator, nscPath, 1, "pin-set"),
+			ID:          models.GenerateID(NameInventory, models.CategoryPinningIndicator, nscPath, 1, "pin-set"),
 			SessionID:   sessionID,
-			SourceTool:  "inventory",
+			SourceTool:  NameInventory,
 			Category:    models.CategoryPinningIndicator,
 			Title:       "Certificate pinning configured (XML)",
 			Description: "The app uses network_security_config pin-set for certificate pinning.",
 			Evidence:    "<pin-set>",
-			Location:    models.Location{File: "res/xml/network_security_config.xml", Line: 1, Snippet: "<pin-set>"},
+			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "<pin-set>"},
 			Severity:    models.SeverityInfo,
 			Sensitivity: models.SensitivityPublic,
 			Confidence:  1.0,
@@ -324,9 +333,9 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 				line := countLines(content[:loc[0]])
 
 				f := models.Finding{
-					ID:          models.GenerateID("inventory", rule.Category, relPath, line, snippet),
+					ID:          models.GenerateID(NameInventory, rule.Category, relPath, line, snippet),
 					SessionID:   sessionID,
-					SourceTool:  "inventory",
+					SourceTool:  NameInventory,
 					Category:    rule.Category,
 					Title:       rule.Name,
 					Description: fmt.Sprintf("Pattern match for %s in %s", rule.Name, relPath),

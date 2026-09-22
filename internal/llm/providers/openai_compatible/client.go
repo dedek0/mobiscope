@@ -56,7 +56,7 @@ type Config struct {
 // New creates a Provider from a Config.
 func New(cfg Config) *Provider {
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = "http://localhost:8080/v1"
+		cfg.BaseURL = defaultLocalBaseURL
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -189,10 +189,10 @@ func (p *Provider) Chat(ctx context.Context, req llmtypes.ChatRequest) (*llmtype
 	messages := toOpenAIMessages(req.Messages)
 
 	oaiReq := openai.ChatCompletionRequest{
-		Model:       req.Model,
-		Messages:    messages,
-		MaxTokens:   req.MaxTokens,
-		Temperature: float32(req.Temperature),
+		Model:               req.Model,
+		Messages:            messages,
+		MaxCompletionTokens: req.MaxTokens,
+		Temperature:         float32(req.Temperature),
 	}
 
 	if req.JSONMode {
@@ -229,11 +229,11 @@ func (p *Provider) ChatStream(ctx context.Context, req llmtypes.ChatRequest) (io
 	messages := toOpenAIMessages(req.Messages)
 
 	oaiReq := openai.ChatCompletionRequest{
-		Model:       req.Model,
-		Messages:    messages,
-		MaxTokens:   req.MaxTokens,
-		Temperature: float32(req.Temperature),
-		Stream:      true,
+		Model:               req.Model,
+		Messages:            messages,
+		MaxCompletionTokens: req.MaxTokens,
+		Temperature:         float32(req.Temperature),
+		Stream:              true,
 	}
 
 	if req.JSONMode {
@@ -329,8 +329,8 @@ func (p *Provider) ProbeCapabilities(ctx context.Context) llmtypes.Capabilities 
 	defer cancel()
 
 	_, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:     p.defaultModel(),
-		MaxTokens: 1,
+		Model:               p.defaultModel(),
+		MaxCompletionTokens: 1,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: "ok"},
 		},

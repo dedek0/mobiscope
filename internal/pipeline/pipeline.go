@@ -126,13 +126,13 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
 
 		invResult := models.ToolResult{
-			ToolName:  "inventory",
+			ToolName:  analyzers.NameInventory,
 			Version:   "1.0.0",
 			StartedAt: time.Now(),
 			Duration:  time.Since(session.StartedAt),
 		}
 		session.ToolResults = append(session.ToolResults, invResult)
-		meta.Tools = append(meta.Tools, ToolMeta{Name: "inventory", Version: "1.0.0"})
+		meta.Tools = append(meta.Tools, ToolMeta{Name: analyzers.NameInventory, Version: "1.0.0"})
 	}
 
 	// Phase 3: dedup.
@@ -192,7 +192,7 @@ func (p *Pipeline) shouldRunInventory(stages []string) bool {
 		return true
 	}
 	for _, s := range stages {
-		if s == "inventory" {
+		if s == analyzers.NameInventory {
 			return true
 		}
 	}

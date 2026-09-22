@@ -97,7 +97,7 @@ func CheckBinary(name string) error {
 
 // ParseVersion runs `<binary> --version` and returns the first line.
 func ParseVersion(binary string) string {
-	cmd := exec.Command(binary, "--version") //nolint:gosec
+	cmd := exec.CommandContext(context.Background(), binary, "--version") //nolint:gosec // G204: binary name comes from a fixed analyzer allowlist
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

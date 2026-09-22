@@ -245,7 +245,7 @@ func TestProvider_Chat_WithOptions(t *testing.T) {
 		var req map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		assert.Equal(t, float64(0.7), req["temperature"])
-		assert.Equal(t, float64(100), req["max_tokens"])
+		assert.Equal(t, float64(100), req["max_completion_tokens"])
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
