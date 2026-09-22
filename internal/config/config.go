@@ -1,12 +1,31 @@
+// Package config loads and validates mobiscope configuration.
+//
+// Configuration is resolved in layers, later layers overriding earlier ones:
+//
+//  1. built-in defaults
+//  2. TOML config file
+//  3. environment variables
+//  4. command-line flags (only those explicitly set)
+//
+// See resolveConfigPath for the config file discovery order.
 package config
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/knadh/koanf/parsers/toml"
+	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/providers/posflag"
 	"github.com/knadh/koanf/v2"
+	"github.com/spf13/pflag"
 )
 
 // Config represents the complete application configuration.
@@ -16,11 +35,11 @@ type Config struct {
 
 // LLMConfig holds all LLM-related configuration.
 type LLMConfig struct {
-	DefaultProvider   string          `koanf:"default_provider" validate:"required"`
+	DefaultProvider   string          `koanf:"default_provider" validate:"omitempty"`
 	AllowCloud        bool            `koanf:"allow_cloud"`
 	AllowCloudSecrets bool            `koanf:"allow_cloud_secrets"`
-	Tasks             map[string]Task `koanf:"tasks"`
-	Providers         ProvidersConfig `koanf:"providers" validate:"required"`
+	Tasks             map[string]Task `koanf:"tasks" validate:"dive"`
+	Providers         ProvidersConfig `koanf:"providers" validate:"required,dive,required"`
 }
 
 // Task defines which provider/model to use for a specific task type.
@@ -29,92 +48,264 @@ type Task struct {
 	Model    string `koanf:"model"    validate:"required"`
 }
 
-// ProvidersConfig holds configuration for all supported LLM providers.
-type ProvidersConfig struct {
-	Ollama           *ProviderConfig `koanf:"ollama"`
-	OpenAICompatible *ProviderConfig `koanf:"openai_compatible"`
-	OpenAI           *ProviderConfig `koanf:"openai"`
-	Anthropic        *ProviderConfig `koanf:"anthropic"`
-	Gemini           *ProviderConfig `koanf:"gemini"`
-}
+// ProvidersConfig holds configuration for every configured LLM provider,
+// keyed by provider name (e.g. "ollama", "openai", "anthropic").
+type ProvidersConfig map[string]*ProviderConfig
 
 // ProviderConfig holds configuration for a single LLM provider.
 type ProviderConfig struct {
-	Type      string `koanf:"type"`
+	Type      string `koanf:"type" validate:"omitempty,oneof=ollama openai openai_compatible anthropic gemini"`
 	Preset    string `koanf:"preset"`
-	BaseURL   string `koanf:"base_url"`
-	APIKeyEnv string `koanf:"api_key_env"`
+	BaseURL   string `koanf:"base_url" validate:"omitempty,http_url"`
+	APIKeyEnv string `koanf:"api_key_env" validate:"omitempty,envvar"`
 	APIKey    string `koanf:"api_key"`
-	Timeout   int    `koanf:"timeout"`
+	Timeout   int    `koanf:"timeout" validate:"omitempty,gt=0"`
 }
 
+// wellKnownEnv maps conventional environment variables to config keys so
+// existing provider credentials keep working without a config file.
+var wellKnownEnv = map[string]string{
+	"OLLAMA_HOST":          "llm.providers.ollama.base_url",
+	"OPENAI_API_KEY":       "llm.providers.openai.api_key",
+	"ANTHROPIC_API_KEY":    "llm.providers.anthropic.api_key",
+	"GOOGLE_API_KEY":       "llm.providers.gemini.api_key",
+	"GEMINI_API_KEY":       "llm.providers.gemini.api_key",
+	"OPENROUTER_API_KEY":   "llm.providers.openrouter.api_key",
+	"GROQ_API_KEY":         "llm.providers.groq.api_key",
+	"TOGETHER_API_KEY":     "llm.providers.together.api_key",
+	"AZURE_OPENAI_API_KEY": "llm.providers.azure.api_key",
+}
+
+// envVarNameRe matches POSIX-style environment variable names.
+var envVarNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // Load reads configuration from file, environment variables, and flags.
-func Load(ctx context.Context, cfgPath string) (*Config, error) {
+//
+// cfgPath is an explicit config file path; when empty the path is taken from
+// $MOBISCOPE_CONFIG and then from the default discovery locations. flags may
+// be nil; only flags explicitly set on the command line override lower layers.
+func Load(ctx context.Context, cfgPath string, flags *pflag.FlagSet) (*Config, error) {
 	k := koanf.New(".")
 
-	if cfgPath != "" {
-		if err := loadFromFile(k, cfgPath); err != nil {
+	path, err := resolveConfigPath(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	if path != "" {
+		if err := loadFromFile(k, path); err != nil {
 			return nil, fmt.Errorf("loading config file: %w", err)
 		}
 	}
 
-	loadEnv(k)
+	if err := loadEnv(k); err != nil {
+		return nil, fmt.Errorf("loading environment variables: %w", err)
+	}
+
+	if flags != nil {
+		if err := loadFlags(k, flags); err != nil {
+			return nil, fmt.Errorf("loading flags: %w", err)
+		}
+	}
 
 	cfg := &Config{}
-	if err := k.Unmarshal("", cfg); err != nil {
+	if err := unmarshal(k, cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
 	applyDefaults(cfg)
 
-	v := validator.New()
-	if err := v.StructCtx(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
+	if err := validate(ctx, cfg); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
 }
 
-func loadFromFile(_ *koanf.Koanf, path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+// unmarshal decodes koanf keys into cfg, coercing string values (from env
+// vars and flags) into the typed struct fields.
+func unmarshal(k *koanf.Koanf, cfg *Config) error {
+	return k.UnmarshalWithConf("", cfg, koanf.UnmarshalConf{
+		DecoderConfig: &mapstructure.DecoderConfig{
+			DecodeHook:       mapstructure.StringToTimeDurationHookFunc(),
+			WeaklyTypedInput: true,
+			Result:           cfg,
+			TagName:          "koanf",
+		},
+	})
+}
+
+// resolveConfigPath returns the config file to load.
+//
+// Order: explicit path, $MOBISCOPE_CONFIG, then default locations.
+// An empty explicit path is not an error when no file exists anywhere;
+// an explicit (or env-selected) path that is missing is an error.
+func resolveConfigPath(explicit string) (string, error) {
+	if explicit != "" {
+		if !configFileExists(explicit) {
+			return "", fmt.Errorf("config file not found: %s", explicit)
+		}
+		return explicit, nil
+	}
+
+	if p := os.Getenv("MOBISCOPE_CONFIG"); p != "" {
+		if !configFileExists(p) {
+			return "", fmt.Errorf("config file not found: %s", p)
+		}
+		return p, nil
+	}
+
+	for _, p := range defaultConfigPaths() {
+		if configFileExists(p) {
+			return p, nil
+		}
+	}
+	return "", nil
+}
+
+// configFileExists reports whether path exists. The path is user-provided
+// (flag/env/discovery) by design in this local CLI tool; no network exposure.
+func configFileExists(path string) bool {
+	_, err := os.Stat(filepath.Clean(path)) //nolint:gosec // G703: user-supplied config path is intentional
+	return err == nil
+}
+
+func defaultConfigPaths() []string {
+	paths := []string{"config.toml", "mobiscope.toml"}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".config", "mobiscope", "config.toml"),
+			filepath.Join(home, ".mobiscope", "config.toml"),
+		)
+	}
+	return paths
+}
+
+// loadFromFile loads a TOML config file into k.
+func loadFromFile(k *koanf.Koanf, path string) error {
+	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	case "", ".toml":
+	default:
+		return fmt.Errorf("unsupported config format %q: only TOML is supported", ext)
+	}
+
+	if !configFileExists(path) {
 		return fmt.Errorf("config file not found: %s", path)
+	}
+
+	if err := k.Load(file.Provider(path), toml.Parser()); err != nil {
+		return fmt.Errorf("parsing %s: %w", path, err)
 	}
 	return nil
 }
 
-func loadEnv(_ *koanf.Koanf) {
-	// TODO: implement env loading with koanf provider
+// loadEnv loads environment variables into k.
+//
+// Two families are recognized:
+//   - MOBISCOPE_<PATH> where PATH uses "__" as the key separator
+//     (MOBISCOPE_LLM__ALLOW_CLOUD -> llm.allow_cloud)
+//   - well-known provider variables such as OPENAI_API_KEY or OLLAMA_HOST
+func loadEnv(k *koanf.Koanf) error {
+	return k.Load(env.ProviderWithValue("", ".", func(key, value string) (string, interface{}) {
+		if strings.HasPrefix(key, "MOBISCOPE_") {
+			path := strings.TrimPrefix(key, "MOBISCOPE_")
+			if path == "CONFIG" {
+				return "", nil // path is handled by resolveConfigPath
+			}
+			path = strings.ToLower(strings.ReplaceAll(path, "__", "."))
+			if path == "" {
+				return "", nil
+			}
+			return path, value
+		}
+		if mapped, ok := wellKnownEnv[key]; ok {
+			return mapped, value
+		}
+		return "", nil
+	}), nil)
 }
 
+// loadFlags merges explicitly-set command-line flags into k (highest precedence).
+// Unchanged flags only apply when no lower layer provided a value.
+func loadFlags(k *koanf.Koanf, flags *pflag.FlagSet) error {
+	return k.Load(posflag.ProviderWithValue(flags, ".", k, func(name, value string) (string, interface{}) {
+		switch name {
+		case "config":
+			return "", nil // path is handled by resolveConfigPath
+		case "provider":
+			if value == "" {
+				return "", nil
+			}
+			return "llm.default_provider", value
+		case "allow-cloud":
+			return "llm.allow_cloud", value
+		default:
+			return name, value
+		}
+	}), nil)
+}
+
+// applyDefaults fills gaps left by lower-precedence layers. It never
+// overwrites a value that is already set.
 func applyDefaults(cfg *Config) {
 	if cfg.LLM.DefaultProvider == "" {
 		cfg.LLM.DefaultProvider = "ollama"
 	}
 
-	if cfg.LLM.Providers.Ollama == nil {
-		cfg.LLM.Providers.Ollama = &ProviderConfig{
+	if cfg.LLM.Providers == nil {
+		cfg.LLM.Providers = ProvidersConfig{}
+	}
+	if cfg.LLM.Providers["ollama"] == nil {
+		cfg.LLM.Providers["ollama"] = &ProviderConfig{
 			BaseURL: "http://localhost:11434",
 		}
 	}
 
 	if cfg.LLM.Tasks == nil {
-		cfg.LLM.Tasks = map[string]Task{
-			"triage": {
-				Provider: "ollama",
-				Model:    "qwen2.5-coder:7b",
-			},
-			"remediation": {
-				Provider: "ollama",
-				Model:    "qwen2.5-coder:7b",
-			},
-			"chat": {
-				Provider: "ollama",
-				Model:    "qwen2.5-coder:7b",
-			},
-			"correlate": {
-				Provider: "ollama",
-				Model:    "qwen2.5-coder:7b",
-			},
+		cfg.LLM.Tasks = map[string]Task{}
+	}
+	for name, def := range defaultTasks() {
+		if _, ok := cfg.LLM.Tasks[name]; !ok {
+			cfg.LLM.Tasks[name] = def
 		}
 	}
+}
+
+func defaultTasks() map[string]Task {
+	def := Task{Provider: "ollama", Model: "qwen2.5-coder:7b"}
+	return map[string]Task{
+		"triage":      def,
+		"remediation": def,
+		"chat":        def,
+		"correlate":   def,
+	}
+}
+
+// validate runs struct validation and cross-field checks.
+func validate(ctx context.Context, cfg *Config) error {
+	v := validator.New()
+	if err := v.RegisterValidation("envvar", validateEnvVarName); err != nil {
+		return fmt.Errorf("registering validator: %w", err)
+	}
+
+	if err := v.StructCtx(ctx, cfg); err != nil {
+		return fmt.Errorf("validating config: %w", err)
+	}
+
+	if cfg.LLM.DefaultProvider != "" {
+		if _, ok := cfg.LLM.Providers[cfg.LLM.DefaultProvider]; !ok {
+			return fmt.Errorf("validating config: default_provider %q is not defined in [llm.providers]", cfg.LLM.DefaultProvider)
+		}
+	}
+
+	for name, task := range cfg.LLM.Tasks {
+		if _, ok := cfg.LLM.Providers[task.Provider]; !ok {
+			return fmt.Errorf("validating config: task %q references unknown provider %q", name, task.Provider)
+		}
+	}
+
+	return nil
+}
+
+func validateEnvVarName(fl validator.FieldLevel) bool {
+	return envVarNameRe.MatchString(fl.Field().String())
 }
