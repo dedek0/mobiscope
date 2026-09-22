@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: build the Go binary
 # ---------------------------------------------------------------------------
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
