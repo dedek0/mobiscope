@@ -154,3 +154,28 @@ func TestBoolStr(t *testing.T) {
 	assert.Equal(t, "yes", boolStr(true))
 	assert.Equal(t, "no", boolStr(false))
 }
+
+func TestShortID_ShortDoesNotPanic(t *testing.T) {
+	assert.Equal(t, "abc", shortID("abc"))
+	assert.Equal(t, "12345678", shortID("12345678"))
+	assert.Equal(t, "12345678", shortID("1234567890abcdef"))
+}
+
+func TestBuildMDData_UnknownSeverityGroup(t *testing.T) {
+	session := &models.AnalysisSession{
+		ID:     "s",
+		Status: models.StatusCompleted,
+		Findings: []models.Finding{
+			{ID: "aaaaaaa1", Title: "A", Severity: models.SeverityCritical},
+			{ID: "b", Title: "B", Severity: ""},
+		},
+	}
+	data := buildMDData(session)
+	sevs := make([]string, 0, len(data.Groups))
+	for _, g := range data.Groups {
+		sevs = append(sevs, g.Severity)
+	}
+	assert.Contains(t, sevs, "critical")
+	assert.Contains(t, sevs, "")
+	assert.Len(t, data.Groups, 2)
+}

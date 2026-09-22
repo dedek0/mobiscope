@@ -1,10 +1,10 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/dedek0/mobiscope/internal/analyzers"
@@ -48,7 +48,12 @@ func newAnalyzeCmd() *cobra.Command {
 
 			var stageFilter []string
 			if stages != "" {
-				stageFilter = strings.Split(stages, ",")
+				for _, s := range strings.Split(stages, ",") {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						stageFilter = append(stageFilter, s)
+					}
+				}
 			}
 
 			analyzersList := buildAnalyzers(stageFilter, noRes)
@@ -62,6 +67,10 @@ func newAnalyzeCmd() *cobra.Command {
 			if triage {
 				if err := runTriage(c, session, logger, triageProvider); err != nil {
 					return fmt.Errorf("triage failed: %w", err)
+				}
+				sessionDir := filepath.Join(workdir, session.ID)
+				if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+					return fmt.Errorf("persisting triage results: %w", err)
 				}
 			}
 
@@ -117,19 +126,17 @@ func runTriage(c *cobra.Command, session *models.AnalysisSession, logger *slog.L
 	cost := llm.NewCostAccumulator(logger)
 	triageEngine := llm.NewTriageEngine(router, cache, cost, llm.DefaultTriageConfig(), logger)
 
-	_, err = triageEngine.Triage(c.Context(), session.Findings, nil)
-	if err != nil {
-		if errors.Is(err, llm.ErrCloudNotAllowed) || errors.Is(err, llm.ErrProviderUnavailable) {
-			return err
-		}
+	if _, err = triageEngine.Triage(c.Context(), session.Findings, nil); err != nil {
+		return err
 	}
-	return err
+	pipeline.PropagateClusterVerdicts(session.Findings)
+	return nil
 }
 
 func countTriaged(findings []models.Finding) int {
 	count := 0
 	for _, f := range findings {
-		if f.LLMVerdict != "" {
+		if f.LLMVerdict == models.VerdictConfirmed || f.LLMVerdict == models.VerdictLikelyFP {
 			count++
 		}
 	}
@@ -139,7 +146,7 @@ func countTriaged(findings []models.Finding) int {
 func buildAnalyzers(stages []string, noRes bool) []analyzers.Analyzer {
 	stageSet := make(map[string]bool)
 	for _, s := range stages {
-		stageSet[strings.TrimSpace(s)] = true
+		stageSet[s] = true
 	}
 
 	var list []analyzers.Analyzer

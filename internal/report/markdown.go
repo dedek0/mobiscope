@@ -60,15 +60,22 @@ func (r *MarkdownReporter) Render(session *models.AnalysisSession, w io.Writer) 
 
 func buildMDData(session *models.AnalysisSession) mdData {
 	counts := make(map[string]int)
+	clusterCounts := make(map[string]int)
 	for _, f := range session.Findings {
 		counts[string(f.Severity)]++
+		if f.ClusterID != "" {
+			clusterCounts[f.ClusterID]++
+		}
 	}
 
 	bySev := make(map[string][]mdFindingRow)
 	for _, f := range session.Findings {
-		extra := clusterExtraCount(f, session.Findings)
+		extra := 0
+		if f.ClusterID != "" {
+			extra = clusterCounts[f.ClusterID] - 1
+		}
 		row := mdFindingRow{
-			ID:             f.ID[:8],
+			ID:             shortID(f.ID),
 			Title:          f.Title,
 			Category:       string(f.Category),
 			File:           f.Location.File,
@@ -85,10 +92,23 @@ func buildMDData(session *models.AnalysisSession) mdData {
 
 	sevOrder := []string{"critical", "high", "medium", "low", "info"}
 	var groups []mdGroup
+	seen := make(map[string]bool, len(sevOrder))
 	for _, sev := range sevOrder {
 		if rows, ok := bySev[sev]; ok {
 			groups = append(groups, mdGroup{Severity: sev, Findings: rows})
+			seen[sev] = true
 		}
+	}
+	// Catch empty/unknown severities so they are not silently dropped.
+	unknown := make([]string, 0)
+	for sev := range bySev {
+		if !seen[sev] {
+			unknown = append(unknown, sev)
+		}
+	}
+	sort.Strings(unknown)
+	for _, sev := range unknown {
+		groups = append(groups, mdGroup{Severity: sev, Findings: bySev[sev]})
 	}
 
 	return mdData{
@@ -101,17 +121,12 @@ func buildMDData(session *models.AnalysisSession) mdData {
 	}
 }
 
-func clusterExtraCount(f models.Finding, all []models.Finding) int {
-	if f.ClusterID == "" {
-		return 0
+// shortID returns at most 8 characters of id without panicking on short ids.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
 	}
-	count := 0
-	for _, other := range all {
-		if other.ClusterID == f.ClusterID && other.ID != f.ID {
-			count++
-		}
-	}
-	return count
+	return id
 }
 
 func boolStr(b bool) string {
