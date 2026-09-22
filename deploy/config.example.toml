@@ -1,5 +1,14 @@
 # mobiscope configuration example
 # Copy this file to ~/.config/mobiscope/config.toml or pass via --config.
+#
+# Precedence (later wins):
+#   built-in defaults  <  this file  <  environment variables  <  CLI flags
+#
+# Any key can also be set via MOBISCOPE_<PATH> with "__" as separator,
+# e.g. MOBISCOPE_LLM__ALLOW_CLOUD=true  or
+#      MOBISCOPE_LLM__PROVIDERS__OLLAMA__BASE_URL=http://127.0.0.1:11434
+# Well-known provider credentials (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+# OLLAMA_HOST, ...) are picked up automatically.
 
 [llm]
 default_provider = "ollama"

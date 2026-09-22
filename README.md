@@ -104,22 +104,45 @@ docker compose up mobiscope
 ### Flags Globais
 
 ```
+--config <path>      Arquivo de configuração (TOML)
 --provider <nome>    Override do provider LLM para todas as tarefas
 --allow-cloud        Permite uso de providers cloud (por padrão só local)
 ```
 
-## Configuração
+> Veja [Configuration](#configuration) para a precedência completa e as variáveis de ambiente suportadas.
 
-### Arquivo de Config
+## Configuration
+
+### Precedence
+
+Configuration is resolved in layers. Later layers override earlier ones:
+
+```
+built-in defaults  <  TOML file  <  environment variables  <  CLI flags
+```
+
+- **Defaults** only fill gaps — a value set in any higher layer is never overwritten.
+- **CLI flags** are applied only when explicitly set on the command line (an unchanged flag never clobbers a file or env value).
+- Cross-field rules are validated at load time: `llm.default_provider` and every `llm.tasks.*.provider` must reference a defined `[llm.providers.<name>]` section.
+
+### Config file
+
+TOML only. The file is looked up in this order (first match wins):
+
+1. `--config /path/to/config.toml`
+2. `$MOBISCOPE_CONFIG`
+3. `./config.toml`
+4. `./mobiscope.toml`
+5. `~/.config/mobiscope/config.toml`
+6. `~/.mobiscope/config.toml`
 
 ```bash
-# Localização padrão: ~/.config/mobiscope/config.toml
-# Ou via flag: --config /path/to/config.toml
-
 cp deploy/config.example.toml config.toml
 ```
 
-### Config TOML Completa
+An explicit path (`--config` or `$MOBISCOPE_CONFIG`) that does not exist is an error. When no path is given and no file is found, built-in defaults are used.
+
+### Full TOML example
 
 ```toml
 [llm]
@@ -127,7 +150,7 @@ default_provider = "ollama"
 allow_cloud = false
 allow_cloud_secrets = false
 
-# Providers por tarefa
+# Providers per task. Missing tasks fall back to the built-in defaults.
 [llm.tasks.triage]
 provider = "ollama"
 model = "qwen2.5-coder:7b"
@@ -156,6 +179,7 @@ base_url = "http://localhost:11434"
 
 # Provider: Anthropic (cloud)
 # [llm.providers.anthropic]
+# type = "anthropic"
 # api_key_env = "ANTHROPIC_API_KEY"
 
 # Provider: llama.cpp (local)
@@ -165,17 +189,44 @@ base_url = "http://localhost:11434"
 # base_url = "http://localhost:8080/v1"
 ```
 
-### Variáveis de Ambiente
+`[llm.providers.<name>]` is a free-form map: add as many providers as you want. `type` is one of `ollama`, `openai`, `openai_compatible`, `anthropic`, `gemini` (or a known preset name, which implies `openai_compatible`). Optional fields: `preset`, `base_url` (must be a valid http(s) URL), `api_key_env`, `api_key`, `timeout` (seconds, > 0).
 
-| Variável | Provider | Obrigatória |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI | Sim (se usar OpenAI) |
-| `ANTHROPIC_API_KEY` | Anthropic | Sim (se usar Anthropic) |
-| `GOOGLE_API_KEY` | Gemini | Sim (se usar Gemini) |
-| `OPENROUTER_API_KEY` | OpenRouter | Sim (se usar OpenRouter) |
-| `GROQ_API_KEY` | Groq | Sim (se usar Groq) |
-| `TOGETHER_API_KEY` | Together | Sim (se usar Together) |
-| `AZURE_OPENAI_API_KEY` | Azure | Sim (se usar Azure) |
+### Environment variables
+
+#### Generic overrides
+
+Any config key can be set with the `MOBISCOPE_` prefix, using `__` as the key separator:
+
+| Variable | Config key |
+|----------|------------|
+| `MOBISCOPE_CONFIG` | (config file path, handled separately) |
+| `MOBISCOPE_LLM__DEFAULT_PROVIDER` | `llm.default_provider` |
+| `MOBISCOPE_LLM__ALLOW_CLOUD` | `llm.allow_cloud` |
+| `MOBISCOPE_LLM__ALLOW_CLOUD_SECRETS` | `llm.allow_cloud_secrets` |
+| `MOBISCOPE_LLM__PROVIDERS__OLLAMA__BASE_URL` | `llm.providers.ollama.base_url` |
+| `MOBISCOPE_LLM__TASKS__TRIAGE__MODEL` | `llm.tasks.triage.model` |
+
+#### Well-known provider credentials
+
+| Variable | Config key | Provider |
+|----------|------------|----------|
+| `OLLAMA_HOST` | `llm.providers.ollama.base_url` | Ollama |
+| `OPENAI_API_KEY` | `llm.providers.openai.api_key` | OpenAI |
+| `ANTHROPIC_API_KEY` | `llm.providers.anthropic.api_key` | Anthropic |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | `llm.providers.gemini.api_key` | Gemini |
+| `OPENROUTER_API_KEY` | `llm.providers.openrouter.api_key` | OpenRouter |
+| `GROQ_API_KEY` | `llm.providers.groq.api_key` | Groq |
+| `TOGETHER_API_KEY` | `llm.providers.together.api_key` | Together |
+| `AZURE_OPENAI_API_KEY` | `llm.providers.azure.api_key` | Azure OpenAI |
+
+### CLI flags
+
+| Flag | Config key | Notes |
+|------|------------|-------|
+| `--config <path>` | — | Config file path |
+| `--provider <name>` | `llm.default_provider` | Overrides provider for all tasks |
+| `--allow-cloud` | `llm.allow_cloud` | Permits cloud LLM providers |
+
 
 ## Providers Suportados
 
