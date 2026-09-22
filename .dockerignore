@@ -7,3 +7,6 @@ tmp/
 .env*
 coverage.out
 *.test
+targets/
+samples/
+config.toml

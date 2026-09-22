@@ -42,19 +42,50 @@ make build
 
 ### Docker
 
+The image ships the full toolchain: `mobiscope`, `gitleaks`, `semgrep`,
+`apktool`, `jadx` and a JRE. Analysis runs as a non-root user.
+
 ```bash
-# Build da imagem
+# Build
 docker build -t mobiscope .
 
-# Com Ollama local (CPU)
+# App only (loopback on 127.0.0.1:8080)
+docker compose up mobiscope
+
+# App + local Ollama (CPU)
 docker compose --profile local-llm up -d
 
-# Com Ollama + GPU NVIDIA
+# App + local Ollama (NVIDIA GPU)
 docker compose --profile local-llm-gpu up -d
 
-# Apenas a aplicação (usar LLM cloud)
-docker compose up mobiscope
+# One-off analysis against a local APK
+docker compose run --rm mobiscope analyze /app/samples/app.apk --triage
 ```
+
+Layout expected on the host:
+
+| Path | Purpose |
+|------|---------|
+| `./samples/` | APK/IPA inputs (mounted read-only) |
+| `./targets/` | Analysis output (`findings.json`, `report.md`, `session.json`) |
+| `./config.toml` | Optional config (uncomment the mount in `docker-compose.yml`) |
+
+The published port binds `127.0.0.1` only. To expose the API beyond the host,
+set `MOBISCOPE_API_TOKEN` and change the port mapping deliberately — see
+[SECURITY.md](SECURITY.md).
+
+Environment variables (also see `.env.example`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MOBISCOPE_LOG_LEVEL` | `info` | Log verbosity |
+| `MOBISCOPE_API_TOKEN` | unset | Enables bearer auth on `/api/*` |
+| `OLLAMA_HOST` | `http://ollama:11434` | Ollama endpoint (in-compose default) |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` | unset | Cloud providers (local-only when unset) |
+
+> **Note.** `codesign`, `otool`, `plutil` and `class-dump` are macOS-only.
+> iOS analysis inside the container uses the Linux-capable subset
+> (`unzip`, `plistutil`, `llvm-objdump`, `ldid`).
 
 ## Uso
 

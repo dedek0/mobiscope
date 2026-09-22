@@ -6,16 +6,38 @@ services:
       dockerfile: Dockerfile
     container_name: mobiscope
     ports:
-      - "8080:8080"
+      # Loopback only. The API is unauthenticated unless MOBISCOPE_API_TOKEN
+      # is set; do not publish on 0.0.0.0 without it. See SECURITY.md.
+      - "127.0.0.1:8080:8080"
     volumes:
+      # Analysis output (findings.json, report.md, session.json).
       - ./targets:/app/targets
-      - ./config.toml:/app/config.toml:ro
+      # Optional config file. Uncomment only if ./config.toml exists —
+      # mounting a missing path creates a directory and breaks the load.
+      # - ./config.toml:/app/config.toml:ro
+      # APK/IPA inputs.
+      - ./samples:/app/samples:ro
     environment:
-      - MOBISCOPE_LOG_LEVEL=info
+      - MOBISCOPE_LOG_LEVEL=${MOBISCOPE_LOG_LEVEL:-info}
+      # Set to enable bearer auth on /api/* (required if you publish ports
+      # beyond loopback):
+      # - MOBISCOPE_API_TOKEN=${MOBISCOPE_API_TOKEN}
+      # Cloud provider keys (leave unset for local-only operation):
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Point at the bundled Ollama when using the local-llm profile:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
     depends_on:
       ollama:
         condition: service_healthy
         required: false
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # --- Ollama (local LLM) ---
@@ -26,7 +48,7 @@ services:
     profiles:
       - local-llm
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
@@ -45,7 +67,7 @@ services:
     profiles:
       - local-llm-gpu
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama-data:/root/.ollama
     deploy:
