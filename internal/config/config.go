@@ -30,16 +30,31 @@ import (
 
 // Config represents the complete application configuration.
 type Config struct {
-	LLM LLMConfig `koanf:"llm" validate:"required"`
+	LLM      LLMConfig      `koanf:"llm"      validate:"required"`
+	Pipeline PipelineConfig `koanf:"pipeline"`
+}
+
+// PipelineConfig controls analyzer execution.
+type PipelineConfig struct {
+	// MaxConcurrency bounds how many external tools run at once.
+	MaxConcurrency int `koanf:"max_concurrency" validate:"omitempty,gt=0"`
+	// FailFast aborts the pipeline on the first analyzer error.
+	FailFast bool `koanf:"fail_fast"`
 }
 
 // LLMConfig holds all LLM-related configuration.
 type LLMConfig struct {
-	DefaultProvider   string          `koanf:"default_provider" validate:"omitempty"`
-	AllowCloud        bool            `koanf:"allow_cloud"`
-	AllowCloudSecrets bool            `koanf:"allow_cloud_secrets"`
-	Tasks             map[string]Task `koanf:"tasks" validate:"dive"`
-	Providers         ProvidersConfig `koanf:"providers" validate:"required,dive,required"`
+	DefaultProvider   string `koanf:"default_provider" validate:"omitempty"`
+	AllowCloud        bool   `koanf:"allow_cloud"`
+	AllowCloudSecrets bool   `koanf:"allow_cloud_secrets"`
+	// MaxRetries is the number of retries for transient LLM failures.
+	MaxRetries int `koanf:"max_retries" validate:"omitempty,gte=0,lte=10"`
+	// RetryBaseDelayMS is the base backoff delay in milliseconds.
+	RetryBaseDelayMS int `koanf:"retry_base_delay_ms" validate:"omitempty,gt=0"`
+	// TimeoutSeconds caps a single LLM call.
+	TimeoutSeconds int             `koanf:"timeout_seconds" validate:"omitempty,gt=0"`
+	Tasks          map[string]Task `koanf:"tasks" validate:"dive"`
+	Providers      ProvidersConfig `koanf:"providers" validate:"required,dive,required"`
 }
 
 // Task defines which provider/model to use for a specific task type.
@@ -267,6 +282,20 @@ func applyDefaults(cfg *Config) {
 		if _, ok := cfg.LLM.Tasks[name]; !ok {
 			cfg.LLM.Tasks[name] = def
 		}
+	}
+
+	if cfg.LLM.MaxRetries == 0 {
+		cfg.LLM.MaxRetries = 3
+	}
+	if cfg.LLM.RetryBaseDelayMS == 0 {
+		cfg.LLM.RetryBaseDelayMS = 500
+	}
+	if cfg.LLM.TimeoutSeconds == 0 {
+		cfg.LLM.TimeoutSeconds = 60
+	}
+
+	if cfg.Pipeline.MaxConcurrency == 0 {
+		cfg.Pipeline.MaxConcurrency = 4
 	}
 }
 
