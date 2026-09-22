@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/analyzers"
 	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/dedek0/mobiscope/internal/report"
 	"github.com/dedek0/mobiscope/internal/utils"
+	"golang.org/x/sync/errgroup"
 )
 
 // Meta represents the metadata persisted alongside analysis artifacts.
@@ -39,21 +41,53 @@ type FindingCollector interface {
 	Analyze(workdir string, sessionID string) []models.Finding
 }
 
+// Options controls pipeline execution.
+type Options struct {
+	// MaxConcurrency bounds how many external tools run at once (default 4).
+	MaxConcurrency int
+	// FailFast aborts on the first analyzer error instead of continuing.
+	FailFast bool
+	// DryRun lists the stages that would run without executing anything.
+	DryRun bool
+}
+
 // Pipeline orchestrates a sequence of Analyzer stages.
 type Pipeline struct {
 	analyzers []analyzers.Analyzer
 	logger    *slog.Logger
+	opts      Options
 }
 
-// New creates a Pipeline with the given analyzers.
+// New creates a Pipeline with the given analyzers and default options.
 func New(analyzers []analyzers.Analyzer, logger *slog.Logger) *Pipeline {
+	return NewWithOptions(analyzers, logger, Options{})
+}
+
+// NewWithOptions creates a Pipeline with explicit execution options.
+func NewWithOptions(analyzers []analyzers.Analyzer, logger *slog.Logger, opts Options) *Pipeline {
+	if opts.MaxConcurrency <= 0 {
+		opts.MaxConcurrency = 4
+	}
 	return &Pipeline{
 		analyzers: analyzers,
 		logger:    logger,
+		opts:      opts,
 	}
 }
 
+// analyzerRun records one analyzer's outcome for thread-safe collection.
+type analyzerRun struct {
+	tool     models.ToolResult
+	meta     ToolMeta
+	findings []models.Finding
+	err      error
+}
+
 // Run executes the configured analyzers against the APK.
+//
+// Independent analyzers run concurrently (decompilers first, then scanners
+// that read decompiler output). Results are collected in the order the
+// analyzers were registered so reports stay deterministic.
 func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stages []string) (*models.AnalysisSession, error) {
 	sha256, err := utils.Sha256File(apkPath)
 	if err != nil {
@@ -61,6 +95,11 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	}
 
 	sessionDir := filepath.Join(workdir, sha256[:16])
+
+	if p.opts.DryRun {
+		return p.dryRun(apkPath, sha256, stages), nil
+	}
+
 	if err := utils.EnsureDir(sessionDir); err != nil {
 		return nil, fmt.Errorf("creating session directory: %w", err)
 	}
@@ -81,44 +120,88 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	filtered := p.filterAnalyzers(stages)
 
-	// Phase 1: run external tool analyzers (apktool, jadx, gitleaks, semgrep).
-	for _, a := range filtered {
-		if err := ctx.Err(); err != nil {
-			p.logger.Warn("pipeline cancelled", "tool", a.Name(), "error", err)
-			session.Status = models.StatusFailed
-			break
-		}
+	// Phase 1: decompilers (independent of each other).
+	decompilers := selectByName(filtered, "apktool", "jadx")
+	// Phase 2: scanners (read decompiler output).
+	scanners := selectByName(filtered, "gitleaks", "semgrep")
 
-		p.logger.Info("running analyzer", "tool", a.Name())
-
-		toolResult, err := a.Run(ctx, apkPath, sessionDir)
-		session.ToolResults = append(session.ToolResults, toolResult)
-
-		meta.Tools = append(meta.Tools, ToolMeta{
-			Name:      toolResult.ToolName,
-			Version:   toolResult.Version,
-			StartedAt: toolResult.StartedAt,
-			Duration:  toolResult.Duration,
-			ExitCode:  toolResult.ExitCode,
-			Error:     toolResult.Error,
-		})
-
-		if err != nil {
-			p.logger.Error("analyzer failed", "tool", a.Name(), "error", err)
-			continue
-		}
-
-		// Convert tool output to findings if applicable.
-		findings := p.convertFindings(a, toolResult, session.ID)
-		session.Findings = append(session.Findings, findings...)
-
-		p.logger.Info("analyzer completed",
-			"tool", a.Name(),
-			"duration", toolResult.Duration.String(),
-		)
+	runs := make([]analyzerRun, len(filtered))
+	idx := make(map[string]int, len(filtered))
+	for i, a := range filtered {
+		idx[a.Name()] = i
 	}
 
-	// Phase 2: run inventory analyzer (no external binary).
+	runGroup := func(group []analyzers.Analyzer) {
+		var mu sync.Mutex
+		g := errgroup.Group{}
+		g.SetLimit(p.opts.MaxConcurrency)
+
+		for _, a := range group {
+			a := a
+			g.Go(func() error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+
+				p.logger.Info("running analyzer", "tool", a.Name())
+				toolResult, err := a.Run(ctx, apkPath, sessionDir)
+
+				findings := []models.Finding{}
+				if err == nil {
+					findings = p.convertFindings(a, toolResult, session.ID)
+				} else {
+					p.logger.Error("analyzer failed", "tool", a.Name(), "error", err)
+				}
+
+				mu.Lock()
+				runs[idx[a.Name()]] = analyzerRun{
+					tool: toolResult,
+					meta: ToolMeta{
+						Name:      toolResult.ToolName,
+						Version:   toolResult.Version,
+						StartedAt: toolResult.StartedAt,
+						Duration:  toolResult.Duration,
+						ExitCode:  toolResult.ExitCode,
+						Error:     toolResult.Error,
+					},
+					findings: findings,
+					err:      err,
+				}
+				mu.Unlock()
+
+				if err != nil && p.opts.FailFast {
+					return err
+				}
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}
+
+	runGroup(decompilers)
+	if ctx.Err() == nil {
+		runGroup(scanners)
+	}
+
+	// Collect in registration order for deterministic output.
+	var firstErr error
+	for _, r := range runs {
+		if r.meta.Name == "" {
+			continue
+		}
+		session.ToolResults = append(session.ToolResults, r.tool)
+		meta.Tools = append(meta.Tools, r.meta)
+		session.Findings = append(session.Findings, r.findings...)
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+	}
+
+	if ctx.Err() != nil {
+		session.Status = models.StatusFailed
+	}
+
+	// Phase 3: inventory analyzer (no external binary).
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
 		inv := analyzers.NewInventory()
@@ -140,23 +223,27 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		})
 	}
 
-	// Phase 3: dedup.
+	// Phase 4: dedup.
 	session.Findings = Dedup(session.Findings)
 	p.logger.Info("dedup complete", "findings", len(session.Findings))
 
-	// Phase 4: clustering (NO LLM calls in this phase).
+	// Phase 5: clustering (NO LLM calls in this phase).
 	clustered, clusterCount := Cluster(session.Findings, p.logger)
 	session.Findings = clustered
 	p.logger.Info("clustering complete", "clusters", clusterCount)
 
-	// Phase 5: sort by severity.
+	// Phase 6: sort by severity.
 	report.SortFindingsBySeverity(session.Findings)
 
-	// Phase 6: persist artifacts.
+	// Phase 7: persist artifacts.
 	now := time.Now()
 	session.CompletedAt = &now
 	if session.Status == models.StatusRunning {
-		session.Status = models.StatusCompleted
+		if firstErr != nil && p.opts.FailFast {
+			session.Status = models.StatusFailed
+		} else {
+			session.Status = models.StatusCompleted
+		}
 	}
 
 	metaPath := filepath.Join(sessionDir, "meta.json")
@@ -168,7 +255,39 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		p.logger.Error("failed to persist session artifacts", "error", err)
 	}
 
+	if firstErr != nil && p.opts.FailFast {
+		return session, fmt.Errorf("pipeline aborted (fail-fast): %w", firstErr)
+	}
 	return session, nil
+}
+
+// dryRun reports what would run without executing anything.
+func (p *Pipeline) dryRun(apkPath, sha256 string, stages []string) *models.AnalysisSession {
+	session := &models.AnalysisSession{
+		ID:        sha256[:16],
+		APKPath:   apkPath,
+		APKHash:   sha256,
+		StartedAt: time.Now(),
+		Status:    models.StatusPending,
+	}
+
+	filtered := p.filterAnalyzers(stages)
+	for _, a := range filtered {
+		avail := ""
+		if err := a.Available(); err != nil {
+			avail = " (unavailable: " + err.Error() + ")"
+		}
+		p.logger.Info("dry-run stage", "tool", a.Name(), "status", "would run"+avail)
+		session.ToolResults = append(session.ToolResults, models.ToolResult{
+			ToolName: a.Name(),
+			Error:    avail,
+		})
+	}
+	if p.shouldRunInventory(stages) {
+		p.logger.Info("dry-run stage", "tool", analyzers.NameInventory, "status", "would run")
+		session.ToolResults = append(session.ToolResults, models.ToolResult{ToolName: analyzers.NameInventory})
+	}
+	return session
 }
 
 // PersistArtifacts writes findings.json, report.md and session.json into
@@ -237,6 +356,21 @@ func (p *Pipeline) filterAnalyzers(stages []string) []analyzers.Analyzer {
 		}
 	}
 	return filtered
+}
+
+// selectByName returns the subset of analyzers whose Name() is in names.
+func selectByName(list []analyzers.Analyzer, names ...string) []analyzers.Analyzer {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	var out []analyzers.Analyzer
+	for _, a := range list {
+		if want[a.Name()] {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func persistMeta(path string, meta *Meta) error {
