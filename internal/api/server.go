@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/dedek0/mobiscope/internal/config"
 	"github.com/dedek0/mobiscope/internal/llm"
@@ -20,9 +23,13 @@ type Server struct {
 	factory   *llm.Factory
 	providers map[string]llm.Provider
 	logger    *slog.Logger
+	authToken string
 }
 
 // NewServer creates a new API server.
+//
+// Authentication is disabled unless MOBISCOPE_API_TOKEN is set. The server is
+// intended for local use; see SECURITY.md before exposing it on a network.
 func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 	factory := llm.NewFactory(logger)
 	providers, err := factory.CreateAll(cfg.LLM.Providers)
@@ -35,16 +42,20 @@ func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		factory:   factory,
 		providers: providers,
 		logger:    logger,
+		authToken: os.Getenv("MOBISCOPE_API_TOKEN"),
 	}
 
 	s.router = s.buildRouter()
 	return s, nil
 }
 
-// Handler returns the http.Handler for testing.
+// Handler returns the http.Handler for testing and for the serve command.
 func (s *Server) Handler() http.Handler {
 	return s.router
 }
+
+// maxBodyBytes caps request payloads (1 MiB).
+const maxBodyBytes = 1 << 20
 
 func (s *Server) buildRouter() *chi.Mux {
 	r := chi.NewRouter()
@@ -53,6 +64,10 @@ func (s *Server) buildRouter() *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Heartbeat("/healthz"))
+	r.Use(limitBody)
+	if s.authToken != "" {
+		r.Use(bearerAuth(s.authToken))
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/llm", func(r chi.Router) {
@@ -70,6 +85,50 @@ func (s *Server) buildRouter() *chi.Mux {
 	})
 
 	return r
+}
+
+// limitBody rejects oversized request payloads.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxBodyBytes {
+			JSONError(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// decodeJSON decodes a request body and maps size-limit errors to 413.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	err := json.NewDecoder(r.Body).Decode(dst)
+	if err == nil {
+		return nil
+	}
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) || strings.Contains(err.Error(), "request body too large") {
+		JSONError(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return err
+	}
+	JSONError(w, "invalid request body", http.StatusBadRequest)
+	return err
+}
+
+// bearerAuth enforces a static bearer token. Only installed when a token is
+// configured; the default local deployment is unauthenticated.
+func bearerAuth(token string) func(http.Handler) http.Handler {
+	want := "Bearer " + token
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != want {
+				JSONError(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // --- LLM Handlers ---
@@ -123,6 +182,7 @@ func (s *Server) handleLLMConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleLLMTest sends a test prompt to a provider and returns the response.
+// The provider and model from the request body are honored when set.
 func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`
@@ -130,8 +190,7 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 		Model    string `json:"model"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(w, r, &req); err != nil {
 		return
 	}
 
@@ -142,10 +201,33 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 	llmRouter := llm.NewRouter(s.providers, s.cfg.LLM, s.logger)
 	task := llmtypes.TaskType(req.Task)
 
-	route, err := llmRouter.Route(r.Context(), task, false)
-	if err != nil {
-		JSONError(w, err.Error(), http.StatusServiceUnavailable)
-		return
+	var route *llm.RouteResult
+	var err error
+	if req.Provider != "" {
+		p, ok := s.providers[req.Provider]
+		if !ok {
+			JSONError(w, "provider not found: "+req.Provider, http.StatusNotFound)
+			return
+		}
+		model := req.Model
+		if model == "" {
+			model = s.cfg.LLM.Tasks[req.Task].Model
+		}
+		if model == "" {
+			JSONError(w, "model is required when provider is set explicitly", http.StatusBadRequest)
+			return
+		}
+		if p.Kind() == llmtypes.KindCloud && !s.cfg.LLM.AllowCloud {
+			JSONError(w, "cloud providers are disabled (allow_cloud=false)", http.StatusForbidden)
+			return
+		}
+		route = &llm.RouteResult{Provider: p, Model: model, TaskName: req.Task}
+	} else {
+		route, err = llmRouter.Route(r.Context(), task, false)
+		if err != nil {
+			JSONError(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	prompt := "Respond with exactly: {\"status\":\"ok\"}"
@@ -182,8 +264,7 @@ func (s *Server) handleLLMPull(w http.ResponseWriter, r *http.Request) {
 		Model    string `json:"model"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONError(w, "invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(w, r, &req); err != nil {
 		return
 	}
 
