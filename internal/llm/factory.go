@@ -36,17 +36,17 @@ func (f *Factory) Create(name string, cfg *config.ProviderConfig) (Provider, err
 	}
 
 	switch effectiveType {
-	case "ollama":
+	case NameOllama:
 		return ollama.New(cfg.BaseURL, f.logger), nil
 
-	case "openai", "openai_compatible":
+	case NameOpenAI, "openai_compatible":
 		return f.createOpenAICompatible(name, cfg)
 
-	case "anthropic":
+	case NameAnthropic:
 		apiKey := resolveAPIKey(cfg)
 		return anthropic.New(cfg.BaseURL, apiKey, f.logger), nil
 
-	case "gemini":
+	case NameGemini:
 		apiKey := resolveAPIKey(cfg)
 		return gemini.New(apiKey, f.logger), nil
 
@@ -92,48 +92,19 @@ func (f *Factory) createOpenAICompatible(name string, cfg *config.ProviderConfig
 	}), nil
 }
 
-// CreateAll creates all configured providers.
+// CreateAll creates all configured providers, keyed by provider name.
 func (f *Factory) CreateAll(cfg config.ProvidersConfig) (map[string]Provider, error) {
-	providers := make(map[string]Provider)
+	providers := make(map[string]Provider, len(cfg))
 
-	if cfg.Ollama != nil {
-		p, err := f.Create("ollama", cfg.Ollama)
-		if err != nil {
-			return nil, fmt.Errorf("creating ollama provider: %w", err)
+	for name, pc := range cfg {
+		if pc == nil {
+			continue
 		}
-		providers["ollama"] = p
-	}
-
-	if cfg.OpenAI != nil {
-		p, err := f.Create("openai", cfg.OpenAI)
+		p, err := f.Create(name, pc)
 		if err != nil {
-			return nil, fmt.Errorf("creating openai provider: %w", err)
+			return nil, fmt.Errorf("creating %s provider: %w", name, err)
 		}
-		providers["openai"] = p
-	}
-
-	if cfg.OpenAICompatible != nil {
-		p, err := f.Create("openai_compatible", cfg.OpenAICompatible)
-		if err != nil {
-			return nil, fmt.Errorf("creating openai_compatible provider: %w", err)
-		}
-		providers["openai_compatible"] = p
-	}
-
-	if cfg.Anthropic != nil {
-		p, err := f.Create("anthropic", cfg.Anthropic)
-		if err != nil {
-			return nil, fmt.Errorf("creating anthropic provider: %w", err)
-		}
-		providers["anthropic"] = p
-	}
-
-	if cfg.Gemini != nil {
-		p, err := f.Create("gemini", cfg.Gemini)
-		if err != nil {
-			return nil, fmt.Errorf("creating gemini provider: %w", err)
-		}
-		providers["gemini"] = p
+		providers[name] = p
 	}
 
 	return providers, nil

@@ -40,7 +40,7 @@ type ProbeTarget struct {
 // DefaultProbes returns the standard local endpoints to check.
 func DefaultProbes() []ProbeTarget {
 	return []ProbeTarget{
-		{Name: "ollama", BaseURL: "http://localhost:11434"},
+		{Name: NameOllama, BaseURL: "http://localhost:11434"},
 		{Name: "llamacpp", BaseURL: "http://localhost:8080"},
 		{Name: "lmstudio", BaseURL: "http://localhost:1234"},
 		{Name: "vllm", BaseURL: "http://localhost:8000"},
@@ -57,9 +57,9 @@ type EnvCheck struct {
 // DefaultEnvChecks returns the standard env var checks.
 func DefaultEnvChecks() []EnvCheck {
 	return []EnvCheck{
-		{Name: "openai", EnvVar: "OPENAI_API_KEY"},
-		{Name: "anthropic", EnvVar: "ANTHROPIC_API_KEY"},
-		{Name: "gemini", EnvVar: "GOOGLE_API_KEY"},
+		{Name: NameOpenAI, EnvVar: "OPENAI_API_KEY"},
+		{Name: NameAnthropic, EnvVar: "ANTHROPIC_API_KEY"},
+		{Name: NameGemini, EnvVar: "GOOGLE_API_KEY"},
 		{Name: "openrouter", EnvVar: "OPENROUTER_API_KEY"},
 		{Name: "groq", EnvVar: "GROQ_API_KEY"},
 		{Name: "together", EnvVar: "TOGETHER_API_KEY"},

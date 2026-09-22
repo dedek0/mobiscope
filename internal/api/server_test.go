@@ -26,7 +26,7 @@ func testConfig() *config.Config {
 				"triage": {Provider: "ollama", Model: "qwen2.5-coder:7b"},
 			},
 			Providers: config.ProvidersConfig{
-				Ollama: &config.ProviderConfig{BaseURL: "http://localhost:11434"},
+				"ollama": &config.ProviderConfig{BaseURL: "http://localhost:11434"},
 			},
 		},
 	}

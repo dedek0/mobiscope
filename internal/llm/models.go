@@ -30,7 +30,7 @@ func (r *Registry) registerDefaults() {
 	defaults := []ModelInfo{
 		{
 			ID:            "qwen2.5-coder:7b",
-			Provider:      "ollama",
+			Provider:      NameOllama,
 			DisplayName:   "Qwen 2.5 Coder 7B",
 			ContextWindow: 32768,
 			IsLocal:       true,
@@ -38,7 +38,7 @@ func (r *Registry) registerDefaults() {
 		},
 		{
 			ID:            "llama3.1:8b",
-			Provider:      "ollama",
+			Provider:      NameOllama,
 			DisplayName:   "Llama 3.1 8B",
 			ContextWindow: 131072,
 			IsLocal:       true,
@@ -46,7 +46,7 @@ func (r *Registry) registerDefaults() {
 		},
 		{
 			ID:            "gpt-4o",
-			Provider:      "openai",
+			Provider:      NameOpenAI,
 			DisplayName:   "GPT-4o",
 			ContextWindow: 128000,
 			CostPer1KIn:   0.0025,
@@ -55,7 +55,7 @@ func (r *Registry) registerDefaults() {
 		},
 		{
 			ID:            "gpt-4o-mini",
-			Provider:      "openai",
+			Provider:      NameOpenAI,
 			DisplayName:   "GPT-4o Mini",
 			ContextWindow: 128000,
 			CostPer1KIn:   0.00015,
@@ -64,7 +64,7 @@ func (r *Registry) registerDefaults() {
 		},
 		{
 			ID:            "claude-sonnet-4",
-			Provider:      "anthropic",
+			Provider:      NameAnthropic,
 			DisplayName:   "Claude Sonnet 4",
 			ContextWindow: 200000,
 			CostPer1KIn:   0.003,
@@ -73,7 +73,7 @@ func (r *Registry) registerDefaults() {
 		},
 		{
 			ID:            "gemini-2.0-flash",
-			Provider:      "gemini",
+			Provider:      NameGemini,
 			DisplayName:   "Gemini 2.0 Flash",
 			ContextWindow: 1048576,
 			CostPer1KIn:   0.0001,

@@ -83,8 +83,8 @@ func TestFactory_CreateUnknownProvider(t *testing.T) {
 func TestFactory_CreateAll(t *testing.T) {
 	f := NewFactory(slog.Default())
 	cfg := config.ProvidersConfig{
-		Ollama: &config.ProviderConfig{BaseURL: "http://localhost:11434"},
-		OpenAI: &config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKey: "test"},
+		"ollama": &config.ProviderConfig{BaseURL: "http://localhost:11434"},
+		"openai": &config.ProviderConfig{BaseURL: "https://api.openai.com/v1", APIKey: "test"},
 	}
 
 	providers, err := f.CreateAll(cfg)
