@@ -31,7 +31,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.6
+          # Must be built with a Go version >= the go.mod target (1.26.6).
+          # v2.1.6 is built with go1.24 and refuses to load the config.
+          version: v2.13.2
 
   test:
     name: test
