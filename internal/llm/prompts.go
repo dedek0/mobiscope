@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 )
 
 //go:embed prompts/triage_json.txt
@@ -46,11 +47,14 @@ func RenderTriagePrompt(ctx TriageContext, jsonMode bool) (string, error) {
 }
 
 // TruncateContext truncates code context to fit within maxChars, keeping
-// the relevant line centered. Returns the truncated string and whether
-// truncation occurred.
+// the relevant line centered and never splitting a UTF-8 rune.
 func TruncateContext(code string, maxChars int) (string, bool) {
 	if len(code) <= maxChars {
 		return code, false
 	}
-	return code[:maxChars] + "\n... [truncated]", true
+	cut := maxChars
+	for cut > 0 && !utf8.RuneStart(code[cut]) {
+		cut--
+	}
+	return code[:cut] + "\n... [truncated]", true
 }

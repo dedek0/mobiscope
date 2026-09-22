@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
 	"github.com/dedek0/mobiscope/internal/models"
@@ -31,21 +32,33 @@ func DefaultTriageConfig() TriageConfig {
 
 // TriageEngine performs LLM-based triage on findings.
 type TriageEngine struct {
-	router *Router
-	cache  *Cache
-	cost   *CostAccumulator
-	cfg    TriageConfig
-	logger *slog.Logger
+	router  *Router
+	cache   *Cache
+	cost    *CostAccumulator
+	cfg     TriageConfig
+	retry   RetryConfig
+	timeout time.Duration
+	logger  *slog.Logger
 }
 
-// NewTriageEngine creates a TriageEngine.
+// NewTriageEngine creates a TriageEngine with default retry and timeout settings.
 func NewTriageEngine(router *Router, cache *Cache, cost *CostAccumulator, cfg TriageConfig, logger *slog.Logger) *TriageEngine {
+	return NewTriageEngineWithRetry(router, cache, cost, cfg, DefaultRetryConfig(), 60*time.Second, logger)
+}
+
+// NewTriageEngineWithRetry creates a TriageEngine with explicit retry/timeout settings.
+func NewTriageEngineWithRetry(router *Router, cache *Cache, cost *CostAccumulator, cfg TriageConfig, retry RetryConfig, timeout time.Duration, logger *slog.Logger) *TriageEngine {
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	return &TriageEngine{
-		router: router,
-		cache:  cache,
-		cost:   cost,
-		cfg:    cfg,
-		logger: logger,
+		router:  router,
+		cache:   cache,
+		cost:    cost,
+		cfg:     cfg,
+		retry:   retry,
+		timeout: timeout,
+		logger:  logger,
 	}
 }
 
@@ -159,7 +172,7 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 		}
 	}
 
-	// Call LLM.
+	// Call LLM with retry + per-call timeout.
 	req := llmtypes.ChatRequest{
 		Model: route.Model,
 		Messages: []llmtypes.Message{
@@ -168,12 +181,17 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 		JSONMode: jsonMode,
 	}
 
-	resp, err := route.Provider.Chat(ctx, req)
+	var resp *llmtypes.ChatResponse
+	callCtx, cancel := context.WithTimeout(ctx, te.timeout)
+	err = withRetry(callCtx, te.retry, te.logger, "triage", func() error {
+		var callErr error
+		resp, callErr = route.Provider.Chat(callCtx, req)
+		return callErr
+	})
+	cancel()
 	if err != nil {
 		return fmt.Errorf("chat failed: %w", err)
 	}
-
-	// Record cost.
 	if te.cost != nil {
 		te.cost.Add(route.Provider.Name(), route.Model, resp.Usage)
 	}

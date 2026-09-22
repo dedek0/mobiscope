@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -129,4 +130,13 @@ func TestExtractCodeContext_OutOfRange(t *testing.T) {
 	assert.Equal(t, "", ExtractCodeContext(source, 99, 2))
 	assert.Equal(t, "", ExtractCodeContext(source, 0, 2))
 	assert.Equal(t, "", ExtractCodeContext(source, -1, 2))
+}
+
+func TestTruncateContext_UTF8Boundary(t *testing.T) {
+	s := "日本語のコードです"                        // multi-byte runes
+	out, truncated := TruncateContext(s, 5) // mid-rune cut point
+	assert.True(t, truncated)
+	assert.True(t, strings.Contains(out, "[truncated]"))
+	// Must not contain invalid UTF-8 (replacement char from a broken cut).
+	assert.NotContains(t, out, "\uFFFD")
 }

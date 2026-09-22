@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/models"
@@ -132,13 +133,31 @@ func CheckBinary(name string) error {
 	return nil
 }
 
-// ParseVersion runs `<binary> --version` and returns the first line.
+// versionCache memoizes `binary --version` output per process so every
+// analyzer Run does not spawn an extra subprocess.
+var (
+	versionMu    sync.Mutex
+	versionCache = map[string]string{}
+)
+
+// ParseVersion runs `<binary> --version` once per binary and returns the first line.
 func ParseVersion(binary string) string {
-	cmd := exec.CommandContext(context.Background(), binary, "--version") //nolint:gosec // G204: binary name comes from a fixed analyzer allowlist
-	out, err := cmd.Output()
-	if err != nil {
-		return "unknown"
+	versionMu.Lock()
+	if v, ok := versionCache[binary]; ok {
+		versionMu.Unlock()
+		return v
 	}
-	lines := strings.SplitN(string(out), "\n", 2)
-	return strings.TrimSpace(lines[0])
+	versionMu.Unlock()
+
+	v := "unknown"
+	cmd := exec.CommandContext(context.Background(), binary, "--version") //nolint:gosec // G204: binary name comes from a fixed analyzer allowlist
+	if out, err := cmd.Output(); err == nil {
+		lines := strings.SplitN(string(out), "\n", 2)
+		v = strings.TrimSpace(lines[0])
+	}
+
+	versionMu.Lock()
+	versionCache[binary] = v
+	versionMu.Unlock()
+	return v
 }
