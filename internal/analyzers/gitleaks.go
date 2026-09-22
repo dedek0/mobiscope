@@ -33,7 +33,7 @@ func NewGitleaksWithRunner(runner CommandRunner) *Gitleaks {
 	return &Gitleaks{runner: runner, logger: slog.Default()}
 }
 
-func (g *Gitleaks) Name() string     { return "gitleaks" }
+func (g *Gitleaks) Name() string     { return gitleaksBinary }
 func (g *Gitleaks) Available() error { return CheckBinary(gitleaksBinary) }
 
 func (g *Gitleaks) Run(ctx context.Context, target string, workdir string) (models.ToolResult, error) {

@@ -37,7 +37,7 @@ func NewAPKToolWithRunner(cfg APKToolConfig, runner CommandRunner) *APKTool {
 	return &APKTool{cfg: cfg, runner: runner}
 }
 
-func (a *APKTool) Name() string { return "apktool" }
+func (a *APKTool) Name() string { return apktoolBinary }
 
 func (a *APKTool) Available() error {
 	return CheckBinary(apktoolBinary)
@@ -58,7 +58,7 @@ func (a *APKTool) Run(ctx context.Context, target string, workdir string) (model
 	if a.cfg.NoRes {
 		args = append(args, "-r")
 	}
-	args = append(args, target)
+	args = append(args, "--", target)
 
 	cmdResult, err := a.runner.Run(ctx, apktoolBinary, args, apktoolTimeout, nil)
 	result.Duration = time.Since(start)

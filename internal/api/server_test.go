@@ -33,6 +33,13 @@ func testConfig() *config.Config {
 	return cfg
 }
 
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	srv, err := NewServer(testConfig(), testLogger())
+	require.NoError(t, err)
+	return srv
+}
+
 func TestNewServer(t *testing.T) {
 	srv, err := NewServer(testConfig(), testLogger())
 	require.NoError(t, err)
@@ -171,4 +178,47 @@ func TestJSONOK(t *testing.T) {
 	var resp map[string]string
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "value", resp["key"])
+}
+
+func TestBearerAuth_EnforcedWhenTokenSet(t *testing.T) {
+	t.Setenv("MOBISCOPE_API_TOKEN", "sekrit")
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/llm/config", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/llm/config", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/llm/config", nil)
+	req.Header.Set("Authorization", "Bearer sekrit")
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestBearerAuth_DisabledWithoutToken(t *testing.T) {
+	t.Setenv("MOBISCOPE_API_TOKEN", "")
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/llm/config", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestBodyLimit_RejectsOversized(t *testing.T) {
+	t.Setenv("MOBISCOPE_API_TOKEN", "")
+	srv := newTestServer(t)
+
+	huge := bytes.Repeat([]byte("a"), (1<<20)+10)
+	req := httptest.NewRequest(http.MethodPost, "/api/llm/test", bytes.NewReader(huge))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }

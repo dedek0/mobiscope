@@ -41,7 +41,8 @@ func TestProvider_Capabilities(t *testing.T) {
 func TestProvider_Chat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Contains(t, r.URL.Path, "/models/gemini-2.0-flash:generateContent")
-		assert.Equal(t, "test-key", r.URL.Query().Get("key"))
+		assert.Equal(t, "", r.URL.Query().Get("key"))
+		assert.Equal(t, "test-key", r.Header.Get("x-goog-api-key"))
 
 		var req generateRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)

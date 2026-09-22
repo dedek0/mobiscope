@@ -295,6 +295,10 @@ internal/
 ## API HTTP
 
 ```bash
+# Start the server (loopback only by default)
+./bin/mobiscope serve                 # 127.0.0.1:8080
+./bin/mobiscope serve --addr 0.0.0.0:8080   # NEVER without MOBISCOPE_API_TOKEN
+
 # Health check
 GET /healthz
 
@@ -310,6 +314,11 @@ GET  /api/sessions/
 GET  /api/sessions/{id}
 ```
 
+> **Warning — network exposure.** The API has no authentication by default and
+> can trigger billable LLM calls and model downloads. It binds `127.0.0.1`
+> only. Before binding to any other address, set `MOBISCOPE_API_TOKEN` and put
+> the service behind TLS. See [SECURITY.md](SECURITY.md).
+
 ## Privacidade e Segurança
 
 - **Cloud bloqueado por padrão**: `allow_cloud = false` no config
@@ -317,6 +326,11 @@ GET  /api/sessions/{id}
 - **Exit code 4**: provider indisponível ou cloud bloqueado
 - **API keys via env vars**: nunca em arquivos de config committed
 - **Prompt truncado**: contexto de código limitado a 4000 chars por padrão
+- **Bind loopback por padrão**: `serve` escuta em `127.0.0.1`; autenticação opcional via `MOBISCOPE_API_TOKEN`
+- **Dados não confiáveis cercados**: evidência e código vão para o LLM dentro de `<untrusted_data>`
+- **Symlinks nunca seguidos** na árvore decompilada; binários externos com allowlist
+
+Veja [SECURITY.md](SECURITY.md) para o modelo de ameaças completo.
 
 ## Desenvolvimento
 

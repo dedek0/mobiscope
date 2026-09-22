@@ -29,4 +29,4 @@ WORKDIR /app
 EXPOSE 8080
 
 ENTRYPOINT ["mobiscope"]
-CMD ["serve", "--addr", ":8080"]
+CMD ["serve", "--addr", "0.0.0.0:8080"]

@@ -72,8 +72,7 @@ func (p *Provider) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/models?key=%s", p.baseURL, p.apiKey)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := p.newRequest(ctx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return false
 	}
@@ -86,10 +85,20 @@ func (p *Provider) IsAvailable(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// newRequest builds a request with the API key in a header. The key is never
+// placed in the URL query string where it would leak into proxy and error logs.
+func (p *Provider) newRequest(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("x-goog-api-key", p.apiKey)
+	return httpReq, nil
+}
+
 // Models lists available models via the ListModels API.
 func (p *Provider) Models(ctx context.Context) ([]llmtypes.ModelInfo, error) {
-	url := fmt.Sprintf("%s/models?key=%s", p.baseURL, p.apiKey)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := p.newRequest(ctx, http.MethodGet, p.baseURL+"/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -131,7 +140,7 @@ func (p *Provider) Chat(ctx context.Context, req llmtypes.ChatRequest) (*llmtype
 		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	httpReq, err := p.newRequest(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -186,7 +195,7 @@ func (p *Provider) ChatStream(ctx context.Context, req llmtypes.ChatRequest) (io
 		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	httpReq, err := p.newRequest(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -376,7 +385,7 @@ func (p *Provider) generateURL(model string, stream bool) string {
 	if stream {
 		action = "streamGenerateContent"
 	}
-	return fmt.Sprintf("%s/models/%s:%s?key=%s", p.baseURL, model, action, p.apiKey)
+	return fmt.Sprintf("%s/models/%s:%s", p.baseURL, model, action)
 }
 
 func (p *Provider) mapError(resp *http.Response) error {

@@ -23,7 +23,7 @@ func NewCache(ttl time.Duration) (*Cache, error) {
 		return nil, fmt.Errorf("getting home dir: %w", err)
 	}
 	dir := filepath.Join(home, ".cache", "mobiscope", "llm")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating cache dir: %w", err)
 	}
 	return &Cache{dir: dir, ttl: ttl}, nil
