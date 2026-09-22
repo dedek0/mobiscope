@@ -33,14 +33,40 @@ func EnsureDir(path string) error {
 	return nil
 }
 
-// SafeRmtree removes the directory tree at path if it exists.
-// It does nothing if path does not exist.
-func SafeRmtree(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+// SafeRmtree removes the directory tree at path if it exists, refusing to
+// touch anything outside root. root and path are resolved through symlinks
+// before the check so a symlinked path cannot escape the jail.
+func SafeRmtree(root, path string) error {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving root %s: %w", root, err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolving path %s: %w", path, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = resolved
+	}
+
+	if absPath == absRoot {
+		// Allow removing the root itself only when it is a dedicated temp-like
+		// directory (at least two path segments and not a filesystem root).
+		if absPath == string(os.PathSeparator) || filepath.Dir(absPath) == absPath {
+			return fmt.Errorf("refusing to remove filesystem root %s", absPath)
+		}
+	} else if !strings.HasPrefix(absPath, absRoot+string(os.PathSeparator)) {
+		return fmt.Errorf("refusing to remove %s: outside root %s", absPath, absRoot)
+	}
+
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
 		return nil
 	}
-	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("removing tree %s: %w", path, err)
+	if err := os.RemoveAll(absPath); err != nil {
+		return fmt.Errorf("removing tree %s: %w", absPath, err)
 	}
 	return nil
 }
@@ -104,7 +130,8 @@ func NormalizePath(p string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-// SanitizeFilename replaces path separators and other problematic chars.
+// SanitizeFilename replaces path separators, traversal segments and other
+// problematic chars so the result is safe to use as a single path component.
 func SanitizeFilename(name string) string {
 	replacer := strings.NewReplacer(
 		"/", "_",
@@ -116,17 +143,33 @@ func SanitizeFilename(name string) string {
 		"<", "_",
 		">", "_",
 		"|", "_",
+		"\x00", "_",
 	)
-	return replacer.Replace(name)
+	name = replacer.Replace(name)
+	// Strip control characters (including newlines).
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, name)
+	// Collapse traversal segments and leading dots.
+	name = strings.ReplaceAll(name, "..", "_")
+	name = strings.Trim(name, ".")
+	if name == "" {
+		return "_"
+	}
+	return name
 }
 
 // WriteFile writes data to path, creating parent directories as needed.
+// Files are written 0600 because analysis artifacts may contain secrets.
 func WriteFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := EnsureDir(dir); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec
+	if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec
 		return fmt.Errorf("writing file %s: %w", path, err)
 	}
 	return nil

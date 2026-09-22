@@ -39,12 +39,29 @@ func TestSafeRmtree(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
 	require.NoError(t, os.Mkdir(sub, 0o755))
-	require.NoError(t, SafeRmtree(sub))
+	require.NoError(t, SafeRmtree(dir, sub))
 	assert.NoDirExists(t, sub)
 }
 
 func TestSafeRmtree_NotExists(t *testing.T) {
-	assert.NoError(t, SafeRmtree("/nonexistent/path"))
+	dir := t.TempDir()
+	assert.NoError(t, SafeRmtree(dir, filepath.Join(dir, "nope")))
+}
+
+func TestSafeRmtree_RefusesEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	require.Error(t, SafeRmtree(root, outside))
+	assert.DirExists(t, outside)
+}
+
+func TestSafeRmtree_RefusesRootFS(t *testing.T) {
+	require.Error(t, SafeRmtree("/", "/"))
+}
+
+func TestSafeRmtree_RefusesParent(t *testing.T) {
+	root := t.TempDir()
+	require.Error(t, SafeRmtree(root, filepath.Dir(root)))
 }
 
 func TestHumanSize(t *testing.T) {
@@ -91,6 +108,11 @@ func TestNormalizePath(t *testing.T) {
 func TestSanitizeFilename(t *testing.T) {
 	assert.Equal(t, "a_b_c", SanitizeFilename("a/b/c"))
 	assert.Equal(t, "a_b_c", SanitizeFilename(`a\b\c`))
+	assert.Equal(t, "a.b", SanitizeFilename("a.b"))
+	assert.Equal(t, "_", SanitizeFilename(".."))
+	assert.Equal(t, "a_b", SanitizeFilename("a\nb"))
+	assert.Equal(t, "_", SanitizeFilename(""))
+	assert.NotContains(t, SanitizeFilename("..\\..\\etc"), "..")
 }
 
 func TestWriteFile(t *testing.T) {
@@ -100,6 +122,10 @@ func TestWriteFile(t *testing.T) {
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("data"), got)
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
 func TestDirSize(t *testing.T) {
