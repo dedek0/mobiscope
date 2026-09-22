@@ -37,7 +37,7 @@ install-tools:
 check: fmt vet lint test
 
 serve: build
-	./bin/$(BINARY) serve --addr :8080
+	./bin/$(BINARY) serve --addr 127.0.0.1:8080
 
 docker:
 	docker build -t $(BINARY) .
