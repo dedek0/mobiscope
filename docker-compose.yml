@@ -1,0 +1,67 @@
+services:
+  # --- mobiscope main service ---
+  mobiscope:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mobiscope
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./targets:/app/targets
+      - ./config.toml:/app/config.toml:ro
+    environment:
+      - MOBISCOPE_LOG_LEVEL=info
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  # --- Ollama (local LLM) ---
+  # Start with: docker compose --profile local-llm up
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mobiscope-ollama
+    profiles:
+      - local-llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # --- Ollama with GPU support ---
+  # Start with: docker compose --profile local-llm-gpu up
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: mobiscope-ollama-gpu
+    profiles:
+      - local-llm-gpu
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  ollama-data:

@@ -1,0 +1,40 @@
+# mobiscope — Relatório de Análise
+
+**Sessão:** {{.SessionID}}
+**APK:** {{.APKPath}}
+**Status:** {{.Status}}
+**Total de achados:** {{.Total}}
+
+## Resumo por severidade
+
+| Severidade | Quantidade |
+|------------|-----------|
+{{- range $sev, $count := .Counts}}
+| {{$sev}} | {{$count}} |
+{{- end}}
+
+{{range .Groups}}
+## Severidade: {{.Severity}} ({{len .Findings}})
+
+{{range .Findings}}
+### [{{.ID}}] {{.Title}}
+
+- **Categoria:** {{.Category}}
+- **Arquivo:** `{{.File}}:{{.Line}}`
+- **Sensibilidade:** {{.Sensitivity}}
+- **Confiança:** {{printf "%.0f" (mul .Confidence 100)}}%
+- **Representante:** {{.Representative}}
+{{- if .ClusterID}}
+- **Cluster:** {{.ClusterID}}
+{{- end}}
+{{- if gt .ExtraCount 0}}
+- **e mais {{.ExtraCount}} ocorrências do mesmo padrão**
+{{- end}}
+{{- if .Snippet}}
+- **Trecho:** `{{.Snippet}}`
+{{- end}}
+
+{{end}}
+{{end}}
+---
+_Gerado por mobiscope — nenhuma chamada LLM nesta fase_

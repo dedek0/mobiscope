@@ -1,0 +1,97 @@
+# mobiscope configuration example
+# Copy this file to ~/.config/mobiscope/config.toml or pass via --config.
+
+[llm]
+default_provider = "ollama"
+allow_cloud = false
+allow_cloud_secrets = false
+
+# Task-specific provider/model overrides.
+# If not set, the default_provider is used for all tasks.
+[llm.tasks.triage]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[llm.tasks.remediation]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[llm.tasks.correlate]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[llm.tasks.chat]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+# --- Local Providers ---
+
+[llm.providers.ollama]
+base_url = "http://localhost:11434"
+
+# llama.cpp (llama-server)
+# [llm.providers.llamacpp]
+# type = "openai_compatible"
+# preset = "llamacpp"
+# base_url = "http://localhost:8080/v1"
+
+# LM Studio
+# [llm.providers.lmstudio]
+# type = "openai_compatible"
+# preset = "lmstudio"
+# base_url = "http://localhost:1234/v1"
+
+# vLLM
+# [llm.providers.vllm]
+# type = "openai_compatible"
+# preset = "vllm"
+# base_url = "http://localhost:8000/v1"
+
+# LocalAI
+# [llm.providers.localai]
+# type = "openai_compatible"
+# preset = "localai"
+# base_url = "http://localhost:8080/v1"
+
+# --- Cloud Providers ---
+# Set allow_cloud = true above to use these.
+# API keys can be set via env vars or directly here.
+
+# OpenAI
+# [llm.providers.openai]
+# type = "openai_compatible"
+# preset = "openai"
+# api_key_env = "OPENAI_API_KEY"
+
+# Anthropic
+# [llm.providers.anthropic]
+# api_key_env = "ANTHROPIC_API_KEY"
+
+# Google Gemini
+# [llm.providers.gemini]
+# api_key_env = "GOOGLE_API_KEY"
+
+# OpenRouter
+# [llm.providers.openrouter]
+# type = "openai_compatible"
+# preset = "openrouter"
+# api_key_env = "OPENROUTER_API_KEY"
+
+# Groq
+# [llm.providers.groq]
+# type = "openai_compatible"
+# preset = "groq"
+# api_key_env = "GROQ_API_KEY"
+
+# Together AI
+# [llm.providers.together]
+# type = "openai_compatible"
+# preset = "together"
+# api_key_env = "TOGETHER_API_KEY"
+
+# Azure OpenAI
+# [llm.providers.azure]
+# type = "openai_compatible"
+# preset = "azure"
+# base_url = "https://YOUR_RESOURCE.openai.azure.com/"
+# api_key_env = "AZURE_OPENAI_API_KEY"

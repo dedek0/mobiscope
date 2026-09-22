@@ -1,0 +1,133 @@
+package utils
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Sha256File computes the SHA-256 hex digest of the file at path.
+func Sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("opening file for hash: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("reading file for hash: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// EnsureDir creates the directory (and parents) if it does not exist.
+func EnsureDir(path string) error {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", path, err)
+	}
+	return nil
+}
+
+// SafeRmtree removes the directory tree at path if it exists.
+// It does nothing if path does not exist.
+func SafeRmtree(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("removing tree %s: %w", path, err)
+	}
+	return nil
+}
+
+// HumanSize returns a human-readable representation of a byte count.
+func HumanSize(bytes int64) string {
+	const (
+		kb = 1024
+		mb = kb * 1024
+		gb = mb * 1024
+	)
+
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+// DirSize returns the total size in bytes of all files under dir (non-recursive symlink).
+func DirSize(dir string) (int64, error) {
+	var total int64
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// Exists returns true if path exists.
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// IsDirEmpty returns true if dir exists and contains no entries.
+func IsDirEmpty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, fmt.Errorf("reading directory %s: %w", dir, err)
+	}
+	return len(entries) == 0, nil
+}
+
+// NormalizePath returns a cleaned absolute path.
+func NormalizePath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("resolving path %s: %w", p, err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+// SanitizeFilename replaces path separators and other problematic chars.
+func SanitizeFilename(name string) string {
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	return replacer.Replace(name)
+}
+
+// WriteFile writes data to path, creating parent directories as needed.
+func WriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := EnsureDir(dir); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing file %s: %w", path, err)
+	}
+	return nil
+}

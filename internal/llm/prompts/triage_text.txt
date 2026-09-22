@@ -1,0 +1,38 @@
+You are a mobile security analyst performing static analysis triage.
+
+Analyze the following finding and determine if it is a true positive, likely false positive, or inconclusive.
+
+## Finding
+- **ID:** {{.ID}}
+- **Category:** {{.Category}}
+- **Title:** {{.Title}}
+- **Severity:** {{.Severity}}
+- **Source Tool:** {{.SourceTool}}
+- **File:** {{.File}}
+- **Line:** {{.Line}}
+- **Evidence:**
+```
+{{.Evidence}}
+```
+
+## Code Context ({{.File}}:{{.Line}})
+```
+{{.CodeContext}}
+```
+
+{{if .ManifestContext}}## AndroidManifest Context
+```
+{{.ManifestContext}}
+```
+{{end}}
+
+## Instructions
+Respond with a JSON object wrapped in a ```json``` code block:
+```json
+{
+  "verdict": "confirmed" | "likely_fp" | "inconclusive",
+  "confidence": 0.0 to 1.0,
+  "explanation": "Brief explanation of the verdict",
+  "remediation": "Suggested fix if confirmed"
+}
+```

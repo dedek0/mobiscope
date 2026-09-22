@@ -1,0 +1,45 @@
+.PHONY: build test lint fmt vet clean install-tools check docker serve
+
+BINARY     := mobiscope
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS    := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.buildTime=$(BUILD_TIME)
+
+GOFLAGS := -trimpath
+
+build:
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/mobiscope
+
+test:
+	go test $(GOFLAGS) -race -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+
+lint:
+	golangci-lint run ./...
+
+fmt:
+	gofumpt -w .
+
+vet:
+	go vet ./...
+
+clean:
+	rm -rf bin/ coverage.out
+
+install-tools:
+	go install mvdan.cc/gofumpt@latest
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+check: fmt vet lint test
+
+serve: build
+	./bin/$(BINARY) serve --addr :8080
+
+docker:
+	docker build -t $(BINARY) .
+
+.DEFAULT_GOAL := build

@@ -1,0 +1,113 @@
+- id: mastg-hardcoded-api-key
+  patterns:
+    - pattern-either:
+        - pattern: |
+            String $KEY = "...";
+        - pattern: |
+            $X.putString($KEY, "...")
+  message: Hardcoded API key or secret detected in source code.
+  severity: ERROR
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MSTG-STORAGE-14
+    reference: https://mas.owasp.org/MASWE/MASWE-0008/
+
+- id: mastg-weak-crypto-md5
+  patterns:
+    - pattern-either:
+        - pattern: MessageDigest.getInstance("MD5")
+        - pattern: |
+            $X.getInstance("MD5", ...)
+  message: Use of MD5 hash algorithm which is cryptographically broken.
+  severity: ERROR
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MSTG-CRYPTO-4
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: mastg-weak-crypto-sha1
+  patterns:
+    - pattern-either:
+        - pattern: MessageDigest.getInstance("SHA-1")
+        - pattern: MessageDigest.getInstance("SHA1")
+  message: Use of SHA-1 which has known collision attacks.
+  severity: WARNING
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MSTG-CRYPTO-4
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: mastg-insecure-random
+  patterns:
+    - pattern-either:
+        - pattern: new java.util.Random()
+        - pattern: new Random()
+  message: Use of non-cryptographic random number generator for security-sensitive value.
+  severity: WARNING
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MSTG-CRYPTO-6
+    reference: https://mas.owasp.org/MASWE/MASWE-0027/
+
+- id: mastg-ecb-mode
+  patterns:
+    - pattern: Cipher.getInstance("ECB", ...)
+  message: Use of ECB mode which does not provide semantic security.
+  severity: ERROR
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MSTG-CRYPTO-2
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: mastg-exported-activity
+  patterns:
+    - pattern-either:
+        - pattern: |
+            android:exported="true"
+  message: Component is exported and can be invoked by other apps.
+  severity: INFO
+  languages: [xml]
+  metadata:
+    category: code_pattern
+    severity: INFO
+    masvs: MSTG-PLATFORM-11
+    reference: https://mas.owasp.org/MASWE/MASWE-0055/
+
+- id: mastg-sql-injection
+  patterns:
+    - pattern-either:
+        - pattern: |
+            $DB.rawQuery("..." + $X, ...)
+        - pattern: |
+            $DB.execSQL("..." + $X)
+  message: Potential SQL injection via string concatenation.
+  severity: ERROR
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MSTG-PLATFORM-2
+    reference: https://mas.owasp.org/MASWE/MASWE-0019/
+
+- id: mastg-webview-javascript
+  patterns:
+    - pattern: |
+        $W.getSettings().setJavaScriptEnabled(true)
+  message: WebView has JavaScript enabled, ensure content is trusted.
+  severity: WARNING
+  languages: [java]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MSTG-PLATFORM-5
+    reference: https://mas.owasp.org/MASWE/MASWE-0046/
