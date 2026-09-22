@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -33,8 +34,8 @@ func dedupKey(f models.Finding) string {
 	return fmt.Sprintf("%s|%s|%d|%s", f.Category, f.Location.File, f.Location.Line, hex.EncodeToString(snippetHash[:8]))
 }
 
-// Cluster groups findings by (Category, PatternSignature) and marks representatives.
-// Returns the clustered findings and the number of clusters formed.
+// Cluster groups findings by (SourceTool, Category, Title) and marks representatives.
+// Returns the clustered findings and the number of multi-member clusters formed.
 func Cluster(findings []models.Finding, logger *slog.Logger) ([]models.Finding, int) {
 	if len(findings) == 0 {
 		return findings, 0
@@ -76,13 +77,6 @@ func Cluster(findings []models.Finding, logger *slog.Logger) ([]models.Finding, 
 		}
 	}
 
-	singletonCount := 0
-	for _, indices := range groups {
-		if len(indices) > 1 {
-			singletonCount++
-		}
-	}
-
 	economyPct := 0
 	if totalFindings > 0 {
 		nonRepresentative := 0
@@ -103,27 +97,48 @@ func Cluster(findings []models.Finding, logger *slog.Logger) ([]models.Finding, 
 	return findings, clusterCount
 }
 
-func patternSignature(f models.Finding) string {
-	firstToken := firstNormalizedToken(f.Title)
-	ext := fileExt(f.Location.File)
-	return fmt.Sprintf("%s|%s|%s|%s", f.Category, firstToken, ext, f.Severity)
+// PropagateClusterVerdicts copies each cluster representative's LLM verdict to
+// the non-representative members so a triaged cluster reports consistently.
+func PropagateClusterVerdicts(findings []models.Finding) {
+	reps := make(map[string]int, len(findings))
+	for i := range findings {
+		if findings[i].Representative && findings[i].ClusterID != "" {
+			reps[findings[i].ClusterID] = i
+		}
+	}
+
+	for i := range findings {
+		f := &findings[i]
+		if f.Representative || f.ClusterID == "" {
+			continue
+		}
+		repIdx, ok := reps[f.ClusterID]
+		if !ok {
+			continue
+		}
+		rep := &findings[repIdx]
+		if rep.LLMVerdict == "" {
+			continue
+		}
+		f.LLMVerdict = rep.LLMVerdict
+		f.LLMConfidence = rep.LLMConfidence
+		f.LLMExplanation = rep.LLMExplanation
+		f.LLMRemediation = rep.LLMRemediation
+		f.LLMProvider = rep.LLMProvider
+		f.LLMModel = rep.LLMModel
+	}
 }
 
-func firstNormalizedToken(title string) string {
-	title = strings.TrimSpace(title)
-	fields := strings.Fields(title)
-	if len(fields) == 0 {
-		return ""
-	}
-	return strings.ToLower(fields[0])
+// patternSignature clusters by the finding's identity: same tool, category and
+// title (e.g. "Secret detected: aws-key") in the same file extension.
+func patternSignature(f models.Finding) string {
+	ext := fileExt(f.Location.File)
+	title := strings.ToLower(strings.TrimSpace(f.Title))
+	return fmt.Sprintf("%s|%s|%s|%s", f.SourceTool, f.Category, title, ext)
 }
 
 func fileExt(path string) string {
-	idx := strings.LastIndex(path, ".")
-	if idx < 0 {
-		return ""
-	}
-	return strings.ToLower(path[idx:])
+	return strings.ToLower(filepath.Ext(path))
 }
 
 func computeClusterID(sig string) string {

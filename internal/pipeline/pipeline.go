@@ -120,19 +120,24 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	// Phase 2: run inventory analyzer (no external binary).
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
+		invStart := time.Now()
 		inv := analyzers.NewInventory()
 		invFindings := inv.Analyze(sessionDir, session.ID)
 		session.Findings = append(session.Findings, invFindings...)
+		invDur := time.Since(invStart)
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
 
 		invResult := models.ToolResult{
 			ToolName:  analyzers.NameInventory,
 			Version:   "1.0.0",
-			StartedAt: time.Now(),
-			Duration:  time.Since(session.StartedAt),
+			StartedAt: invStart,
+			Duration:  invDur,
 		}
 		session.ToolResults = append(session.ToolResults, invResult)
-		meta.Tools = append(meta.Tools, ToolMeta{Name: analyzers.NameInventory, Version: "1.0.0"})
+		meta.Tools = append(meta.Tools, ToolMeta{
+			Name: analyzers.NameInventory, Version: "1.0.0",
+			StartedAt: invStart, Duration: invDur,
+		})
 	}
 
 	// Phase 3: dedup.
@@ -159,17 +164,33 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		p.logger.Error("failed to persist meta.json", "error", err)
 	}
 
+	if err := PersistArtifacts(sessionDir, session); err != nil {
+		p.logger.Error("failed to persist session artifacts", "error", err)
+	}
+
+	return session, nil
+}
+
+// PersistArtifacts writes findings.json, report.md and session.json into
+// sessionDir. Call again after mutating the session (e.g. post-LLM-triage)
+// so enrichment is not lost.
+func PersistArtifacts(sessionDir string, session *models.AnalysisSession) error {
 	findingsPath := filepath.Join(sessionDir, "findings.json")
 	if err := persistFindings(findingsPath, session); err != nil {
-		p.logger.Error("failed to persist findings.json", "error", err)
+		return fmt.Errorf("writing findings.json: %w", err)
 	}
 
 	reportPath := filepath.Join(sessionDir, "report.md")
 	if err := persistReport(reportPath, session); err != nil {
-		p.logger.Error("failed to persist report.md", "error", err)
+		return fmt.Errorf("writing report.md: %w", err)
 	}
 
-	return session, nil
+	sessionPath := filepath.Join(sessionDir, "session.json")
+	if err := writeJSONFile(sessionPath, session); err != nil {
+		return fmt.Errorf("writing session.json: %w", err)
+	}
+
+	return nil
 }
 
 func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResult, sessionID string) []models.Finding {

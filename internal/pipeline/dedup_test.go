@@ -119,14 +119,75 @@ func TestDedupKey_DifferentSnippets(t *testing.T) {
 
 func TestPatternSignature(t *testing.T) {
 	f := models.Finding{
-		Category: models.CategorySecret,
-		Title:    "AWS Access Key detected",
-		Severity: models.SeverityCritical,
-		Location: models.Location{File: "Config.java"},
+		SourceTool: "gitleaks",
+		Category:   models.CategorySecret,
+		Title:      "Secret detected: aws-key",
+		Severity:   models.SeverityCritical,
+		Location:   models.Location{File: "Config.java"},
 	}
 	sig := patternSignature(f)
+	assert.Contains(t, sig, "gitleaks")
 	assert.Contains(t, sig, "secret")
-	assert.Contains(t, sig, "aws")
+	assert.Contains(t, sig, "secret detected: aws-key")
 	assert.Contains(t, sig, ".java")
-	assert.Contains(t, sig, "critical")
+}
+
+func TestPatternSignature_DistinctTitles(t *testing.T) {
+	aws := models.Finding{
+		SourceTool: "gitleaks",
+		Category:   models.CategorySecret,
+		Title:      "Secret detected: aws-key",
+		Location:   models.Location{File: "a.java"},
+	}
+	gcp := models.Finding{
+		SourceTool: "gitleaks",
+		Category:   models.CategorySecret,
+		Title:      "Secret detected: gcp-key",
+		Location:   models.Location{File: "b.java"},
+	}
+	assert.NotEqual(t, patternSignature(aws), patternSignature(gcp))
+}
+
+func TestFileExt_DirWithDot(t *testing.T) {
+	assert.Equal(t, ".java", fileExt("src.com/app/Config.java"))
+	assert.Equal(t, "", fileExt("noext"))
+	assert.Equal(t, ".kt", fileExt("dir.d/File.kt"))
+}
+
+func TestPropagateClusterVerdicts(t *testing.T) {
+	findings := []models.Finding{
+		{
+			ID: "rep", ClusterID: "cl-1", Representative: true,
+			LLMVerdict: models.VerdictConfirmed, LLMConfidence: 0.9,
+			LLMExplanation: "real", LLMRemediation: "rotate",
+			LLMProvider: "ollama", LLMModel: "qwen",
+		},
+		{ID: "m1", ClusterID: "cl-1", Representative: false},
+		{ID: "m2", ClusterID: "cl-1", Representative: false},
+		{
+			ID: "solo", ClusterID: "", Representative: true,
+			LLMVerdict: models.VerdictLikelyFP, LLMExplanation: "fp",
+		},
+	}
+	PropagateClusterVerdicts(findings)
+
+	assert.Equal(t, models.VerdictConfirmed, findings[1].LLMVerdict)
+	assert.Equal(t, 0.9, findings[1].LLMConfidence)
+	assert.Equal(t, "real", findings[1].LLMExplanation)
+	assert.Equal(t, "rotate", findings[1].LLMRemediation)
+	assert.Equal(t, "ollama", findings[1].LLMProvider)
+
+	assert.Equal(t, models.VerdictConfirmed, findings[2].LLMVerdict)
+
+	// Unclustered findings are untouched.
+	assert.Equal(t, models.VerdictLikelyFP, findings[3].LLMVerdict)
+}
+
+func TestPropagateClusterVerdicts_EmptyRep(t *testing.T) {
+	findings := []models.Finding{
+		{ID: "rep", ClusterID: "cl-1", Representative: true},
+		{ID: "m1", ClusterID: "cl-1"},
+	}
+	PropagateClusterVerdicts(findings)
+	assert.Equal(t, models.Verdict(""), findings[1].LLMVerdict)
 }
