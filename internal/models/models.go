@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -53,6 +54,37 @@ func (s AnalysisSession) MarshalJSON() ([]byte, error) {
 		StartedAt:   s.StartedAt.Format(time.RFC3339),
 		CompletedAt: timePtrToString(s.CompletedAt),
 	})
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for AnalysisSession,
+// mirroring MarshalJSON's RFC3339 timestamp handling so sessions round-trip.
+func (s *AnalysisSession) UnmarshalJSON(data []byte) error {
+	type Alias AnalysisSession
+	aux := &struct {
+		*Alias
+		StartedAt   string  `json:"started_at"`
+		CompletedAt *string `json:"completed_at"`
+	}{Alias: (*Alias)(s)}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	if aux.StartedAt != "" {
+		t, err := time.Parse(time.RFC3339, aux.StartedAt)
+		if err != nil {
+			return fmt.Errorf("parsing started_at: %w", err)
+		}
+		s.StartedAt = t
+	}
+	if aux.CompletedAt != nil && *aux.CompletedAt != "" {
+		t, err := time.Parse(time.RFC3339, *aux.CompletedAt)
+		if err != nil {
+			return fmt.Errorf("parsing completed_at: %w", err)
+		}
+		s.CompletedAt = &t
+	}
+	return nil
 }
 
 func timePtrToString(t *time.Time) *string {

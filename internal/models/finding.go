@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 // Severity represents the severity level of a finding.
@@ -163,9 +165,17 @@ type Finding struct {
 }
 
 // GenerateID produces a deterministic 16-char hex ID from finding attributes.
+// Fields are joined with NUL so that shifting content between fields cannot
+// collide (e.g. file "a.java" + line 12 vs file "a.java1" + line 2).
 func GenerateID(sourceTool string, category Category, file string, line int, snippet string) string {
 	snippetHash := sha256.Sum256([]byte(snippet))
-	input := fmt.Sprintf("%s%s%s%d%s", sourceTool, category, file, line, hex.EncodeToString(snippetHash[:]))
+	input := strings.Join([]string{
+		sourceTool,
+		string(category),
+		file,
+		strconv.Itoa(line),
+		hex.EncodeToString(snippetHash[:]),
+	}, "\x00")
 	hash := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(hash[:8])
 }

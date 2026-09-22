@@ -260,3 +260,16 @@ func TestVerdict_String(t *testing.T) {
 	assert.Equal(t, "confirmed", VerdictConfirmed.String())
 	assert.Equal(t, "likely_fp", VerdictLikelyFP.String())
 }
+
+func TestGenerateID_FieldCollision(t *testing.T) {
+	// "a.java" + line 12 must differ from "a.java1" + line 2 (delimiter-less concat collided).
+	id1 := GenerateID("semgrep", CategorySecret, "a.java", 12, "x")
+	id2 := GenerateID("semgrep", CategorySecret, "a.java1", 2, "x")
+	assert.NotEqual(t, id1, id2)
+}
+
+func TestGenerateID_ToolCategoryShift(t *testing.T) {
+	id1 := GenerateID("gitleaks", CategorySecret, "f", 1, "s")
+	id2 := GenerateID("gitleakss", CategorySecret, "f", 1, "s")
+	assert.NotEqual(t, id1, id2)
+}
