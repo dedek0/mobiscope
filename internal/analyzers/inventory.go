@@ -182,7 +182,7 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if cleartextRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, nscPath, 1, "cleartext=true"),
+			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, NetworkSecurityConfigFile, 1, "cleartext=true"),
 			SessionID:   sessionID,
 			SourceTool:  NameInventory,
 			Category:    models.CategoryNetworkConfig,
@@ -198,7 +198,7 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if trustAnchorRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, nscPath, 1, "trust-anchors"),
+			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, NetworkSecurityConfigFile, 1, "trust-anchors"),
 			SessionID:   sessionID,
 			SourceTool:  NameInventory,
 			Category:    models.CategoryNetworkConfig,
@@ -214,7 +214,7 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string)
 
 	if certPinRe.MatchString(content) {
 		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryPinningIndicator, nscPath, 1, "pin-set"),
+			ID:          models.GenerateID(NameInventory, models.CategoryPinningIndicator, NetworkSecurityConfigFile, 1, "pin-set"),
 			SessionID:   sessionID,
 			SourceTool:  NameInventory,
 			Category:    models.CategoryPinningIndicator,

@@ -63,14 +63,13 @@ func (a *JADX) Run(ctx context.Context, target string, workdir string) (models.T
 	outDir := filepath.Join(workdir, "jadx")
 
 	args := []string{
-		"--no-res",
 		"--threads-count", fmt.Sprintf("%d", a.cfg.Threads),
 		"-d", outDir,
-		target,
 	}
 	if a.cfg.NoRes {
-		args[0] = "--no-res"
+		args = append(args, "--no-res")
 	}
+	args = append(args, "--", target)
 
 	cmdResult, err := a.runner.Run(ctx, jadxBinary, args, jadxTimeout, nil)
 	result.Duration = time.Since(start)

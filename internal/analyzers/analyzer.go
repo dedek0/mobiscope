@@ -38,6 +38,18 @@ type CommandRunner interface {
 	Run(ctx context.Context, name string, args []string, timeout time.Duration, env []string) (*CommandResult, error)
 }
 
+// ErrExit reports that a command exited with a non-zero code. The companion
+// CommandResult is always populated so callers can decide which exit codes
+// are acceptable (e.g. gitleaks uses 1 for "leaks found").
+type ErrExit struct {
+	Name string
+	Code int
+}
+
+func (e *ErrExit) Error() string {
+	return fmt.Sprintf("%s exited with code %d", e.Name, e.Code)
+}
+
 // DefaultCommandRunner executes real commands.
 type DefaultCommandRunner struct{}
 
@@ -74,9 +86,9 @@ func (r *DefaultCommandRunner) Run(ctx context.Context, name string, args []stri
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
-		} else {
-			return nil, fmt.Errorf("executing %s: %w", name, err)
+			return result, &ErrExit{Name: name, Code: result.ExitCode}
 		}
+		return nil, fmt.Errorf("executing %s: %w", name, err)
 	}
 
 	return result, nil

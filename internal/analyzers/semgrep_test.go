@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -93,9 +94,82 @@ func TestConvertSemgrepFindings(t *testing.T) {
 	f := findings[0]
 	assert.Equal(t, "code_pattern", string(f.Category))
 	assert.Equal(t, "critical", string(f.Severity))
-	assert.Equal(t, "confidential", string(f.Sensitivity))
+	assert.Equal(t, "internal", string(f.Sensitivity))
 	assert.Equal(t, "Crypto.java", f.Location.File)
 	assert.Equal(t, 5, f.Location.Line)
+}
+
+func TestConvertSemgrepFindings_SecretRule(t *testing.T) {
+	sarif := SARIFLog{
+		Runs: []SARIFRun{{
+			Results: []SARIFResult{
+				{
+					RuleID:  "mastg-hardcoded-api-key",
+					Level:   "warning",
+					Message: SARIFMessage{Text: "Hardcoded key"},
+					Locations: []SARIFLocation{{
+						PhysicalLocation: SARIFPhysicalLocation{
+							ArtifactLocation: SARIFArtifactLocation{URI: "src/Key.java"},
+							Region:           SARIFRegion{StartLine: 3, Snippet: SARIFSnippet{Text: "AKIA..."}},
+						},
+					}},
+				},
+			},
+			Tool: SARIFTool{Driver: SARIFDriver{
+				Rules: []SARIFRule{{
+					ID:                   "mastg-hardcoded-api-key",
+					ShortDescription:     SARIFDescription{Text: "Hardcoded API key"},
+					DefaultConfiguration: SARIFConfig{Level: "warning"},
+					Properties:           map[string]interface{}{"category": "secret", "masvs": "MSTG-STORAGE-14"},
+				}},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(sarif)
+
+	findings := ConvertSemgrepFindings(raw, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "secret", string(findings[0].Category))
+	assert.Equal(t, "secret", string(findings[0].Sensitivity))
+}
+
+func TestConvertSemgrepFindings_MissingLevelUsesRuleDefault(t *testing.T) {
+	sarif := SARIFLog{
+		Runs: []SARIFRun{{
+			Results: []SARIFResult{
+				{
+					RuleID:  "mastg-weak-crypto",
+					Message: SARIFMessage{Text: "Weak crypto"},
+					Locations: []SARIFLocation{{
+						PhysicalLocation: SARIFPhysicalLocation{
+							ArtifactLocation: SARIFArtifactLocation{URI: "a.java"},
+							Region:           SARIFRegion{StartLine: 1},
+						},
+					}},
+				},
+			},
+			Tool: SARIFTool{Driver: SARIFDriver{
+				Rules: []SARIFRule{{
+					ID:                   "mastg-weak-crypto",
+					ShortDescription:     SARIFDescription{Text: "Weak crypto"},
+					DefaultConfiguration: SARIFConfig{Level: "error"},
+				}},
+			}},
+		}},
+	}
+	raw, _ := json.Marshal(sarif)
+
+	findings := ConvertSemgrepFindings(raw, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "critical", string(findings[0].Severity))
+	assert.Equal(t, "Weak crypto", findings[0].Title)
+}
+
+func TestNormalizeSarifURI(t *testing.T) {
+	assert.Equal(t, "/home/user/app/src/Main.java", normalizeSarifURI("file:///home/user/app/src/Main.java"))
+	assert.Equal(t, "src/Main.java", normalizeSarifURI("./src/Main.java"))
+	assert.Equal(t, "src/Main.java", normalizeSarifURI("src/Main.java"))
+	assert.Equal(t, "", normalizeSarifURI(""))
 }
 
 func TestConvertSemgrepFindings_WarningLevel(t *testing.T) {
@@ -151,11 +225,10 @@ func TestSARIFLevelToSeverity(t *testing.T) {
 	assert.Equal(t, "low", string(sarifLevelToSeverity("unknown")))
 }
 
-func TestSARIFSeverityToSensitivity(t *testing.T) {
-	assert.Equal(t, "confidential", string(sarifSeverityToSensitivity("error")))
-	assert.Equal(t, "internal", string(sarifSeverityToSensitivity("warning")))
-	assert.Equal(t, "public", string(sarifSeverityToSensitivity("info")))
-	assert.Equal(t, "public", string(sarifSeverityToSensitivity("unknown")))
+func TestCategorySensitivity(t *testing.T) {
+	assert.Equal(t, "secret", string(categorySensitivity(models.CategorySecret)))
+	assert.Equal(t, "internal", string(categorySensitivity(models.CategoryCodePattern)))
+	assert.Equal(t, "internal", string(categorySensitivity(models.CategoryNetworkConfig)))
 }
 
 func TestSemgrep_DeterministicID(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -112,4 +113,40 @@ func TestGitleaks_DeterministicID(t *testing.T) {
 	f1 := ConvertGitleaksFindings(raw, "s1")
 	f2 := ConvertGitleaksFindings(raw, "s1")
 	assert.Equal(t, f1[0].ID, f2[0].ID)
+}
+
+func TestExtractJSONArray_TrimsPreamble(t *testing.T) {
+	out := "WARN: version notice\n[{\"RuleID\":\"r\"}]\ntrailing"
+	raw := extractJSONArray(out)
+	assert.True(t, json.Valid(raw))
+	assert.Contains(t, string(raw), "RuleID")
+}
+
+func TestConvertGitleaksFindings_PreambleStdout(t *testing.T) {
+	out := "gitleaks notice\n[{\"RuleID\":\"aws-key\",\"Secret\":\"AKIA\",\"File\":\"a.java\",\"StartLine\":1,\"Match\":\"AKIA\"}]"
+	raw := extractJSONArray(out)
+	findings := ConvertGitleaksFindings(raw, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "secret", string(findings[0].Category))
+}
+
+func TestGitleaks_Run_AcceptsExitCode1(t *testing.T) {
+	runner := NewMockRunner(`[{"RuleID":"r","Secret":"s","File":"f","StartLine":1,"Match":"m"}]`, "", 1)
+	g := NewGitleaksWithRunner(runner)
+	result, err := g.Run(context.Background(), "a.apk", t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.ExitCode)
+}
+
+func TestGitleaks_Run_RejectsExitCode2(t *testing.T) {
+	runner := NewMockRunner("", "boom", 2)
+	g := NewGitleaksWithRunner(runner)
+	_, err := g.Run(context.Background(), "a.apk", t.TempDir())
+	require.Error(t, err)
+}
+
+func TestGitleaksSeverity_FromTags(t *testing.T) {
+	assert.Equal(t, models.SeverityHigh, gitleaksSeverity(GitleaksFinding{Tags: []string{"high"}}))
+	assert.Equal(t, models.SeverityMedium, gitleaksSeverity(GitleaksFinding{Tags: []string{"medium"}}))
+	assert.Equal(t, models.SeverityCritical, gitleaksSeverity(GitleaksFinding{}))
 }

@@ -115,7 +115,7 @@ func TestAPKTool_Run_NonZeroExit(t *testing.T) {
 	a := NewAPKToolWithRunner(APKToolConfig{}, runner)
 
 	result, err := a.Run(context.Background(), "test.apk", dir)
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.Equal(t, 2, result.ExitCode)
 }
 

@@ -27,6 +27,15 @@ func TestJADX_Run_Success(t *testing.T) {
 
 	assert.Len(t, runner.Calls, 1)
 	assert.Equal(t, "jadx", runner.Calls[0].Name)
+	assert.NotContains(t, runner.Calls[0].Args, "--no-res")
+}
+
+func TestJADX_Run_WithNoRes(t *testing.T) {
+	runner := NewMockRunner("", "", 0)
+	a := NewJADXWithRunner(JADXConfig{NoRes: true}, runner)
+
+	_, err := a.Run(context.Background(), "test.apk", t.TempDir())
+	require.NoError(t, err)
 	assert.Contains(t, runner.Calls[0].Args, "--no-res")
 }
 
@@ -113,7 +122,7 @@ func TestJADX_Run_NonZeroExit(t *testing.T) {
 	a := NewJADXWithRunner(JADXConfig{}, runner)
 
 	result, err := a.Run(context.Background(), "test.apk", t.TempDir())
-	require.NoError(t, err)
+	require.Error(t, err)
 	assert.Equal(t, 3, result.ExitCode)
 }
 

@@ -29,6 +29,9 @@ func (m *MockCommandRunner) Run(_ context.Context, name string, args []string, t
 	if m.Err != nil {
 		return m.Result, m.Err
 	}
+	if m.Result != nil && m.Result.ExitCode != 0 {
+		return m.Result, &ErrExit{Name: name, Code: m.Result.ExitCode}
+	}
 	return m.Result, nil
 }
 
