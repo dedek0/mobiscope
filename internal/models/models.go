@@ -94,3 +94,58 @@ func timePtrToString(t *time.Time) *string {
 	s := t.Format(time.RFC3339)
 	return &s
 }
+
+// AppInventory holds neutral facts about the analyzed app. Findings carry
+// risk; these are observations that inform reports without being findings.
+type AppInventory struct {
+	BundleID     string            `json:"bundle_id,omitempty"`
+	VersionName  string            `json:"version_name,omitempty"`
+	VersionCode  string            `json:"version_code,omitempty"`
+	MinOS        string            `json:"min_os,omitempty"`
+	TargetSDK    string            `json:"target_sdk,omitempty"`
+	Debuggable   bool              `json:"debuggable,omitempty"`
+	Obfuscation  ObfuscationInfo   `json:"obfuscation,omitempty"`
+	NativeLibs   []NativeLib       `json:"native_libs,omitempty"`
+	Network      NetworkPolicy     `json:"network,omitempty"`
+	Entitlements map[string]string `json:"entitlements,omitempty"`
+	URLSchemes   []string          `json:"url_schemes,omitempty"`
+	Permissions  []string          `json:"permissions,omitempty"`
+}
+
+// ObfuscationInfo records code-obfuscation signals and a 0..1 score.
+type ObfuscationInfo struct {
+	Android    bool     `json:"android,omitempty"`
+	IOS        bool     `json:"ios,omitempty"`
+	Stripped   bool     `json:"stripped,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	Indicators []string `json:"indicators,omitempty"`
+}
+
+// NativeLib describes one native binary shipped in the app.
+type NativeLib struct {
+	Path        string   `json:"path"`
+	Kind        string   `json:"kind"` // so | dylib | framework | static_archive | main_binary
+	Archs       []string `json:"archs,omitempty"`
+	Encrypted   bool     `json:"encrypted,omitempty"`
+	InstallName string   `json:"install_name,omitempty"`
+	Linked      []string `json:"linked,omitempty"`
+	Version     string   `json:"version,omitempty"`
+}
+
+// NetworkPolicy summarizes the app's network security posture.
+type NetworkPolicy struct {
+	Kind               string             `json:"kind"` // network_security_config | NSAppTransportSecurity
+	CleartextPermitted bool               `json:"cleartext_permitted,omitempty"`
+	LocalNetworkAllow  bool               `json:"local_network_allow,omitempty"`
+	Pinned             bool               `json:"pinned,omitempty"`
+	Exceptions         []NetworkException `json:"exceptions,omitempty"`
+	Raw                string             `json:"raw,omitempty"`
+}
+
+// NetworkException is one domain-scoped relaxation of the network policy.
+type NetworkException struct {
+	Domain             string `json:"domain"`
+	IncludesSubdomains bool   `json:"includes_subdomains,omitempty"`
+	InsecureHTTPLoads  bool   `json:"insecure_http_loads,omitempty"`
+	TLSMinVersion      string `json:"tls_min_version,omitempty"`
+}
