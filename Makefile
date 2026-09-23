@@ -30,11 +30,17 @@ vet:
 clean:
 	rm -rf bin/ coverage.out
 
+GOFUMPT_VERSION       ?= v0.8.0
+GOLANGCI_LINT_VERSION ?= v2.13.2
+
 install-tools:
-	go install mvdan.cc/gofumpt@latest
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 check: fmt vet lint test
+
+test-integration:
+	go test -tags integration ./...
 
 serve: build
 	./bin/$(BINARY) serve --addr 127.0.0.1:8080

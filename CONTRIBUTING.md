@@ -1,6 +1,8 @@
-# Contribuindo
+# Contributing to mobiscope
 
-## Setup
+Thanks for your interest in contributing.
+
+## Development setup
 
 ```bash
 git clone https://github.com/dedek0/mobiscope.git
@@ -10,14 +12,14 @@ make build
 make test
 ```
 
-## Antes de Enviar um PR
+## Before opening a PR
 
-1. `make check` — formata, veta, linta e testa
-2. Cobertura de testes ≥70% por pacote
-3. Commits em inglês, docs/UX em pt-BR
-4. Nenhum secret ou key hardcoded
+1. `make check` — formats, vets, lints and tests.
+2. Keep per-package test coverage at or above the existing level.
+3. Commits and docs in English; no `Co-Authored-By` trailers.
+4. No hardcoded secrets or API keys.
 
-## Estrutura de Commits
+## Commit style
 
 ```
 feat: add new analyzer for X
@@ -27,6 +29,14 @@ test: add coverage for Z
 refactor: extract helper from W
 ```
 
-## Arquitetura
+Atomic commits, one logical change each.
 
-Veja `docs/adr/` para decisões de design.
+## Architecture
+
+Design decisions live in `docs/adr/`. Remaining work is tracked in
+[PENDING.md](PENDING.md) — check there before starting something new.
+
+## Security issues
+
+Do not file public issues for vulnerabilities. See
+[SECURITY.md](SECURITY.md).

@@ -116,8 +116,9 @@ func (r *Router) tryProvider(ctx context.Context, name, model, taskName string, 
 }
 
 func (r *Router) autoDetect(ctx context.Context, containsSecret bool) (*RouteResult, error) {
-	// Try local providers first.
-	for name, p := range r.providers {
+	// Try local providers first (sorted for deterministic selection).
+	for _, name := range r.sortedProviderNames() {
+		p := r.providers[name]
 		if !p.IsLocal() {
 			continue
 		}
@@ -129,7 +130,8 @@ func (r *Router) autoDetect(ctx context.Context, containsSecret bool) (*RouteRes
 
 	// Try cloud if allowed.
 	if r.cfg.AllowCloud && (!containsSecret || r.cfg.AllowCloudSecrets) {
-		for name, p := range r.providers {
+		for _, name := range r.sortedProviderNames() {
+			p := r.providers[name]
 			if p.IsLocal() {
 				continue
 			}
@@ -141,6 +143,17 @@ func (r *Router) autoDetect(ctx context.Context, containsSecret bool) (*RouteRes
 	}
 
 	return nil, fmt.Errorf("no available provider: %w", ErrProviderUnavailable)
+}
+
+// sortedProviderNames returns provider names in a stable order so map
+// iteration cannot change routing across runs.
+func (r *Router) sortedProviderNames() []string {
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Router) defaultModel(providerName string) string {

@@ -84,7 +84,7 @@ const sarifSchema = "https://json.schemastore.org/sarif-2.1.0.json"
 // Render writes the session as a SARIF 2.1.0 log.
 func (r *SARIFReporter) Render(session *models.AnalysisSession, w io.Writer) error {
 	rules := map[string]sarifRule{}
-	var results []sarifResult
+	results := make([]sarifResult, 0, len(session.Findings))
 
 	for _, f := range session.Findings {
 		ruleID := f.RuleID
