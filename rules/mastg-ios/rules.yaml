@@ -1,0 +1,148 @@
+# MASTG-aligned semgrep rules for iOS (Swift / Objective-C / C).
+# Schema matches rules/mastg/rules.yaml so the SARIF converter picks up
+# metadata.masvs / metadata.category automatically.
+
+- id: ios-uiwebview
+  patterns:
+    - pattern-either:
+        - pattern: UIWebView.alloc.init
+        - pattern: |
+            UIWebView.alloc.initWithFrame(...)
+  message: UIWebView is deprecated and has known security weaknesses; use WKWebView.
+  severity: ERROR
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MASVS-PLATFORM-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0046/
+
+- id: ios-weak-crypto-md5
+  patterns:
+    - pattern-either:
+        - pattern: CC_MD5(...)
+        - pattern: |
+            $X.create(.MD5)
+  message: Use of MD5 hash algorithm which is cryptographically broken.
+  severity: ERROR
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: ERROR
+    masvs: MASVS-CRYPTO-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: ios-weak-crypto-sha1
+  patterns:
+    - pattern-either:
+        - pattern: CC_SHA1(...)
+        - pattern: |
+            $X.create(.SHA1)
+  message: Use of SHA-1 which has known collision attacks.
+  severity: WARNING
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MASVS-CRYPTO-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: ios-ksecattr-always
+  patterns:
+    - pattern-either:
+        - pattern: kSecAttrAccessibleAlways
+        - pattern: kSecAttrAccessibleAlwaysThisDeviceOnly
+  message: Keychain item is always accessible; prefer WhenUnlocked / WhenPasscodeSetThisDeviceOnly.
+  severity: ERROR
+  languages: [swift, objc, c]
+  metadata:
+    category: secret
+    severity: ERROR
+    masvs: MASVS-STORAGE-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0008/
+
+- id: ios-nsfileprotection-none
+  patterns:
+    - pattern: NSFileProtectionNone
+  message: File protection disabled (NSFileProtectionNone); data is readable even when locked.
+  severity: ERROR
+  languages: [swift, objc, c]
+  metadata:
+    category: secret
+    severity: ERROR
+    masvs: MASVS-STORAGE-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0008/
+
+- id: ios-secrandom-misuse
+  patterns:
+    - pattern-either:
+        - pattern: arc4random()
+        - pattern: rand()
+        - pattern: random()
+  message: Non-cryptographic RNG; use SecRandomCopyBytes for security-sensitive values.
+  severity: WARNING
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MASVS-CRYPTO-2
+    reference: https://mas.owasp.org/MASWE/MASWE-0027/
+
+- id: ios-webview-js
+  patterns:
+    - pattern-either:
+        - pattern: $W.configuration.preferences.javaScriptEnabled
+        - pattern: |
+            $W.stringByEvaluatingJavaScriptFromString(...)
+  message: WebView JavaScript evaluation; ensure content is trusted and sandboxed.
+  severity: WARNING
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MASVS-PLATFORM-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0046/
+
+- id: ios-ats-arbitrary-loads
+  patterns:
+    - pattern-either:
+        - pattern: NSAllowsArbitraryLoads
+        - pattern: NSExceptionAllowsInsecureHTTPLoads
+  message: ATS exception allows arbitrary/insecure network loads.
+  severity: ERROR
+  languages: [swift, objc, c, json, xml]
+  metadata:
+    category: network_config
+    severity: ERROR
+    masvs: MASVS-NETWORK-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: ios-trust-bypass
+  patterns:
+    - pattern-either:
+        - pattern: SecTrustEvaluate(...)
+        - pattern: "didReceiveChallenge"
+        - pattern: "urlSession"
+  message: Custom trust evaluation; verify it does not unconditionally accept.
+  severity: WARNING
+  languages: [swift, objc, c]
+  metadata:
+    category: code_pattern
+    severity: WARNING
+    masvs: MASVS-NETWORK-2
+    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+- id: ios-pasteboard-logging
+  patterns:
+    - pattern-either:
+        - pattern: UIPasteboard.generalPasteboard
+        - pattern: UIPasteboard.general
+        - pattern: NSLog(...)
+  message: Pasteboard access or logging; avoid leaking sensitive data.
+  severity: INFO
+  languages: [swift, objc, c]
+  metadata:
+    category: privacy
+    severity: INFO
+    masvs: MASVS-PRIVACY-1
+    reference: https://mas.owasp.org/MASWE/MASWE-0032/

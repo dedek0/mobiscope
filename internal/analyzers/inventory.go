@@ -36,7 +36,7 @@ func (inv *Inventory) Run(_ context.Context, _ string, workdir string) (models.T
 	start := time.Now()
 	result := models.ToolResult{
 		ToolName:  inv.Name(),
-		Version:   "1.0.0",
+		Version:   toolVersion,
 		StartedAt: start,
 	}
 

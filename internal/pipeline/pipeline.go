@@ -130,10 +130,10 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	filtered := p.filterAnalyzers(stages)
 
-	// Phase 1: decompilers (independent of each other).
-	decompilers := selectByName(filtered, "apktool", "jadx")
-	// Phase 2: scanners (read decompiler output).
-	scanners := selectByName(filtered, "gitleaks", "semgrep")
+	// Phase 1: extractors/decompilers (independent of each other).
+	decompilers := selectByName(filtered, "apktool", "jadx", "ipa-extract")
+	// Phase 2: scanners (read extractor output).
+	scanners := selectByName(filtered, "gitleaks", "semgrep", "plist", "macho", "codesign", "strings")
 
 	runs := make([]analyzerRun, len(filtered))
 	idx := make(map[string]int, len(filtered))
@@ -214,21 +214,24 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	// Phase 3: inventory analyzer (no external binary).
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
-		inv := analyzers.NewInventory()
-		invFindings := inv.Analyze(sessionDir, session.ID)
+		invFindings := p.runInventory(sessionDir, session.ID)
 		session.Findings = append(session.Findings, invFindings...)
 		invDur := time.Since(invStart)
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
 
+		invName := analyzers.NameInventory
+		if p.opts.Platform == models.PlatformIOS {
+			invName = "inventory-ios"
+		}
 		invResult := models.ToolResult{
-			ToolName:  analyzers.NameInventory,
+			ToolName:  invName,
 			Version:   "1.0.0",
 			StartedAt: invStart,
 			Duration:  invDur,
 		}
 		session.ToolResults = append(session.ToolResults, invResult)
 		meta.Tools = append(meta.Tools, ToolMeta{
-			Name: analyzers.NameInventory, Version: "1.0.0",
+			Name: invName, Version: "1.0.0",
 			StartedAt: invStart, Duration: invDur,
 		})
 	}
@@ -327,6 +330,14 @@ func PersistArtifacts(sessionDir string, session *models.AnalysisSession) error 
 	return nil
 }
 
+// runInventory dispatches to the platform-appropriate inventory analyzer.
+func (p *Pipeline) runInventory(sessionDir, sessionID string) []models.Finding {
+	if p.opts.Platform == models.PlatformIOS {
+		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID)
+	}
+	return analyzers.NewInventory().Analyze(sessionDir, sessionID)
+}
+
 func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResult, sessionID string) []models.Finding {
 	if result.Output == nil {
 		return nil
@@ -337,6 +348,16 @@ func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResul
 		return analyzers.ConvertGitleaksFindings(result.Output, sessionID)
 	case "semgrep":
 		return analyzers.ConvertSemgrepFindings(result.Output, sessionID)
+	case "ipa-extract":
+		return analyzers.ConvertIPAExtractFindings(result.Output, sessionID)
+	case "plist":
+		return analyzers.ConvertPlistFindings(result.Output, sessionID)
+	case "macho":
+		return analyzers.ConvertMachOFindings(result.Output, sessionID)
+	case "codesign":
+		return analyzers.ConvertCodeSignFindings(result.Output, sessionID)
+	case "strings":
+		return analyzers.ConvertStringsFindings(result.Output, sessionID)
 	}
 
 	return nil

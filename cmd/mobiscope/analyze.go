@@ -195,18 +195,44 @@ func countTriaged(findings []models.Finding) int {
 }
 
 func buildAnalyzers(stages []string, noRes bool, target *platform.Target) []analyzers.Analyzer {
-	_ = target // per-platform dispatch lands with the iOS analyzers
 	stageSet := make(map[string]bool)
 	for _, s := range stages {
 		stageSet[s] = true
 	}
+	want := func(name string) bool { return len(stages) == 0 || stageSet[name] }
 
 	var list []analyzers.Analyzer
 
-	if len(stages) == 0 || stageSet["apktool"] {
+	if target != nil && target.Platform == models.PlatformIOS {
+		if want("ipa-extract") {
+			list = append(list, analyzers.NewIPAExtract())
+		}
+		if want("plist") {
+			list = append(list, analyzers.NewPlistAnalyzer())
+		}
+		if want("macho") {
+			list = append(list, analyzers.NewMachO())
+		}
+		if want("codesign") {
+			list = append(list, analyzers.NewCodeSign())
+		}
+		if want("strings") {
+			list = append(list, analyzers.NewStrings())
+		}
+		if stageSet["gitleaks"] {
+			list = append(list, analyzers.NewGitleaks())
+		}
+		if stageSet["semgrep"] {
+			list = append(list, analyzers.NewSemgrep("rules/mastg-ios"))
+		}
+		return list
+	}
+
+	// Android (default).
+	if want("apktool") {
 		list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: noRes}))
 	}
-	if len(stages) == 0 || stageSet["jadx"] {
+	if want("jadx") {
 		list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: noRes}))
 	}
 	if stageSet["gitleaks"] {
@@ -215,6 +241,5 @@ func buildAnalyzers(stages []string, noRes bool, target *platform.Target) []anal
 	if stageSet["semgrep"] {
 		list = append(list, analyzers.NewSemgrep("rules/mastg"))
 	}
-
 	return list
 }
