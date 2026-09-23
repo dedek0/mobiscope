@@ -44,8 +44,10 @@ func TestInventory_AnalyzeManifest_ExportedComponent(t *testing.T) {
 
 	manifest := `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <activity android:name=".MainActivity" android:exported="true" />
-    <service android:name=".BgService" android:exported="true" />
+    <application>
+        <activity android:name=".MainActivity" android:exported="true" />
+        <service android:name=".BgService" android:exported="true" />
+    </application>
 </manifest>`
 	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "AndroidManifest.xml"), []byte(manifest), 0o600))
 
@@ -106,7 +108,9 @@ func TestInventory_AnalyzeNetworkSecurityConfig(t *testing.T) {
 	inv := NewInventory()
 	findings := inv.analyzeNetworkSecurityConfig(filepath.Join(dir, "jadx"), "s")
 
-	assert.Len(t, findings, 3)
+	// src="system" trust-anchors is the Android default and is NOT a finding;
+	// only cleartext + pin-set should be reported here.
+	assert.Len(t, findings, 2)
 
 	categories := make(map[string]bool)
 	for _, f := range findings {

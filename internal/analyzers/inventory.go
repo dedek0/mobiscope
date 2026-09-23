@@ -70,171 +70,6 @@ func (inv *Inventory) Analyze(workdir string, sessionID string) []models.Finding
 	return findings
 }
 
-// --- AndroidManifest.xml analysis ---
-
-var (
-	exportedComponentRe = regexp.MustCompile(`android:exported\s*=\s*"true"`)
-	debuggableRe        = regexp.MustCompile(`android:debuggable\s*=\s*"true"`)
-	permissionRe        = regexp.MustCompile(`<uses-permission\s+android:name="([^"]+)"`)
-)
-
-func (inv *Inventory) analyzeManifest(dir string, sessionID string) []models.Finding {
-	manifestPath := filepath.Join(dir, AndroidManifestFile)
-	data, err := os.ReadFile(manifestPath) //nolint:gosec
-	if err != nil {
-		return nil
-	}
-
-	content := string(data)
-	var findings []models.Finding //nolint:prealloc
-
-	if debuggableRe.MatchString(content) {
-		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, 1, "debuggable=true"),
-			SessionID:   sessionID,
-			SourceTool:  NameInventory,
-			Category:    models.CategoryManifestIssue,
-			Title:       "Application is debuggable",
-			Description: "android:debuggable=true allows debugging and inspection of the app.",
-			Evidence:    "android:debuggable=\"true\"",
-			Location:    models.Location{File: AndroidManifestFile, Line: 1, Snippet: "android:debuggable=\"true\""},
-			Severity:    models.SeverityHigh,
-			Sensitivity: models.SensitivityConfidential,
-			Confidence:  1.0,
-		})
-	}
-
-	for _, m := range exportedComponentRe.FindAllStringIndex(content, -1) {
-		line := countLines(content[:m[0]])
-		snippet := content[m[0]:minInt(m[1]+40, len(content))]
-		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, line, snippet),
-			SessionID:   sessionID,
-			SourceTool:  NameInventory,
-			Category:    models.CategoryManifestIssue,
-			Title:       "Exported component detected",
-			Description: "Component with android:exported=true can be invoked by other applications.",
-			Evidence:    snippet,
-			Location:    models.Location{File: AndroidManifestFile, Line: line, Snippet: snippet},
-			Severity:    models.SeverityMedium,
-			Sensitivity: models.SensitivityInternal,
-			Confidence:  0.9,
-		})
-	}
-
-	for _, m := range permissionRe.FindAllStringSubmatchIndex(content, -1) {
-		perm := content[m[2]:m[3]]
-		line := countLines(content[:m[0]])
-		if isDangerousPermission(perm) {
-			findings = append(findings, models.Finding{
-				ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, line, perm),
-				SessionID:   sessionID,
-				SourceTool:  NameInventory,
-				Category:    models.CategoryManifestIssue,
-				Title:       fmt.Sprintf("Dangerous permission: %s", perm),
-				Description: fmt.Sprintf("The app requests dangerous permission %s.", perm),
-				Evidence:    perm,
-				Location:    models.Location{File: AndroidManifestFile, Line: line, Snippet: perm},
-				Severity:    models.SeverityMedium,
-				Sensitivity: models.SensitivityInternal,
-				Confidence:  0.8,
-			})
-		}
-	}
-
-	return findings
-}
-
-var dangerousPerms = []string{
-	"READ_CALENDAR", "WRITE_CALENDAR", "CAMERA",
-	"READ_CONTACTS", "WRITE_CONTACTS", "GET_ACCOUNTS",
-	"ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION",
-	"RECORD_AUDIO", "READ_PHONE_STATE", "READ_PHONE_NUMBERS",
-	"CALL_PHONE", "ANSWER_PHONE_CALLS", "READ_CALL_LOG",
-	"WRITE_CALL_LOG", "ADD_VOICEMAIL", "USE_SIP",
-	"BODY_SENSORS", "SEND_SMS", "RECEIVE_SMS", "READ_SMS",
-	"RECEIVE_WAP_PUSH", "RECEIVE_MMS", "READ_EXTERNAL_STORAGE",
-	"WRITE_EXTERNAL_STORAGE",
-}
-
-func isDangerousPermission(perm string) bool {
-	for _, dp := range dangerousPerms {
-		if strings.HasSuffix(perm, dp) {
-			return true
-		}
-	}
-	return false
-}
-
-// --- Network Security Config ---
-
-var (
-	cleartextRe   = regexp.MustCompile(`cleartextTrafficPermitted\s*=\s*"true"`)
-	trustAnchorRe = regexp.MustCompile(`<trust-anchors>`)
-	certPinRe     = regexp.MustCompile(`<pin-set>`)
-)
-
-func (inv *Inventory) analyzeNetworkSecurityConfig(dir string, sessionID string) []models.Finding {
-	nscPath := filepath.Join(dir, "res", "xml", "network_security_config.xml")
-	data, err := os.ReadFile(nscPath) //nolint:gosec
-	if err != nil {
-		return nil
-	}
-
-	content := string(data)
-	var findings []models.Finding
-
-	if cleartextRe.MatchString(content) {
-		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, NetworkSecurityConfigFile, 1, "cleartext=true"),
-			SessionID:   sessionID,
-			SourceTool:  NameInventory,
-			Category:    models.CategoryNetworkConfig,
-			Title:       "Cleartext traffic permitted",
-			Description: "The network security config allows cleartext (HTTP) traffic.",
-			Evidence:    "cleartextTrafficPermitted=\"true\"",
-			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "cleartextTrafficPermitted=\"true\""},
-			Severity:    models.SeverityHigh,
-			Sensitivity: models.SensitivityConfidential,
-			Confidence:  1.0,
-		})
-	}
-
-	if trustAnchorRe.MatchString(content) {
-		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryNetworkConfig, NetworkSecurityConfigFile, 1, "trust-anchors"),
-			SessionID:   sessionID,
-			SourceTool:  NameInventory,
-			Category:    models.CategoryNetworkConfig,
-			Title:       "Custom trust anchors configured",
-			Description: "Custom trust anchors may weaken TLS validation if misconfigured.",
-			Evidence:    "<trust-anchors>",
-			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "<trust-anchors>"},
-			Severity:    models.SeverityMedium,
-			Sensitivity: models.SensitivityInternal,
-			Confidence:  0.7,
-		})
-	}
-
-	if certPinRe.MatchString(content) {
-		findings = append(findings, models.Finding{
-			ID:          models.GenerateID(NameInventory, models.CategoryPinningIndicator, NetworkSecurityConfigFile, 1, "pin-set"),
-			SessionID:   sessionID,
-			SourceTool:  NameInventory,
-			Category:    models.CategoryPinningIndicator,
-			Title:       "Certificate pinning configured (XML)",
-			Description: "The app uses network_security_config pin-set for certificate pinning.",
-			Evidence:    "<pin-set>",
-			Location:    models.Location{File: NetworkSecurityConfigFile, Line: 1, Snippet: "<pin-set>"},
-			Severity:    models.SeverityInfo,
-			Sensitivity: models.SensitivityPublic,
-			Confidence:  1.0,
-		})
-	}
-
-	return findings
-}
-
 // --- Pattern scanning ---
 
 type patternRule struct {
@@ -255,6 +90,26 @@ var scanRules = []patternRule{
 		Name: "GCP API Key", Category: models.CategorySecret,
 		Severity: models.SeverityHigh, Sensitivity: models.SensitivitySecret,
 		Re: regexp.MustCompile(`AIza[0-9A-Za-z_\-]{35}`),
+	},
+	{
+		Name: "Google OAuth Client ID", Category: models.CategorySecret,
+		Severity: models.SeverityHigh, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com`),
+	},
+	{
+		Name: "GitHub Token", Category: models.CategorySecret,
+		Severity: models.SeverityCritical, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}`),
+	},
+	{
+		Name: "Slack Token", Category: models.CategorySecret,
+		Severity: models.SeverityCritical, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`xox[baprs]-[0-9A-Za-z-]{10,}`),
+	},
+	{
+		Name: "Private Key Block", Category: models.CategorySecret,
+		Severity: models.SeverityCritical, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`-----BEGIN (?:RSA |EC )?PRIVATE KEY-----`),
 	},
 	{
 		Name: "Firebase URL", Category: models.CategorySecret,
