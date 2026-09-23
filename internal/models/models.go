@@ -11,8 +11,10 @@ type AnalysisSession struct {
 	ID          string        `json:"id"          validate:"required"`
 	APKPath     string        `json:"apk_path"    validate:"required"`
 	APKHash     string        `json:"apk_hash"`
+	Platform    Platform      `json:"platform"`
 	PackageName string        `json:"package_name"`
 	VersionName string        `json:"version_name"`
+	App         AppInventory  `json:"app,omitempty"`
 	StartedAt   time.Time     `json:"started_at"`
 	CompletedAt *time.Time    `json:"completed_at,omitempty"`
 	Status      SessionStatus `json:"status"`

@@ -15,6 +15,7 @@ import (
 	"github.com/dedek0/mobiscope/internal/llm"
 	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/dedek0/mobiscope/internal/pipeline"
+	"github.com/dedek0/mobiscope/internal/platform"
 	"github.com/spf13/cobra"
 )
 
@@ -33,9 +34,9 @@ func newAnalyzeCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "analyze <apk>",
-		Short: "Run static analysis on an APK file",
-		Long:  "Orchestrates decompilation and analysis tools against the target APK.",
+		Use:   "analyze <app>",
+		Short: "Run static analysis on an Android APK or iOS IPA",
+		Long:  "Orchestrates decompilation and analysis tools against the target APK or IPA.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			level := slog.LevelInfo
@@ -51,9 +52,18 @@ func newAnalyzeCmd() *cobra.Command {
 			defer stop()
 
 			apkPath := args[0]
-			if _, err := os.Stat(apkPath); err != nil {
-				return fmt.Errorf("APK not found: %s: %w", apkPath, err)
+			if err := platform.MustExist(apkPath); err != nil {
+				return err
 			}
+			target, err := platform.Detect(apkPath)
+			if err != nil {
+				return fmt.Errorf("detecting platform: %w", err)
+			}
+			logger.Info("target detected",
+				"path", target.Path,
+				"platform", string(target.Platform),
+				"format", target.Format,
+			)
 
 			var stageFilter []string
 			if stages != "" {
@@ -69,6 +79,7 @@ func newAnalyzeCmd() *cobra.Command {
 				MaxConcurrency: maxConc,
 				FailFast:       failFast,
 				DryRun:         dryRun,
+				Platform:       target.Platform,
 			}
 			if maxConc <= 0 {
 				if cfg, err := loadConfigWithFlags(c); err == nil {
@@ -79,7 +90,7 @@ func newAnalyzeCmd() *cobra.Command {
 				}
 			}
 
-			analyzersList := buildAnalyzers(stageFilter, noRes)
+			analyzersList := buildAnalyzers(stageFilter, noRes, target)
 			p := pipeline.NewWithOptions(analyzersList, logger, opts)
 
 			session, err := p.Run(ctx, apkPath, workdir, stageFilter)
@@ -183,7 +194,8 @@ func countTriaged(findings []models.Finding) int {
 	return count
 }
 
-func buildAnalyzers(stages []string, noRes bool) []analyzers.Analyzer {
+func buildAnalyzers(stages []string, noRes bool, target *platform.Target) []analyzers.Analyzer {
+	_ = target // per-platform dispatch lands with the iOS analyzers
 	stageSet := make(map[string]bool)
 	for _, s := range stages {
 		stageSet[s] = true

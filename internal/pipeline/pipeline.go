@@ -19,10 +19,11 @@ import (
 
 // Meta represents the metadata persisted alongside analysis artifacts.
 type Meta struct {
-	APKPath   string     `json:"apk_path"`
-	APKSHA256 string     `json:"apk_sha256"`
-	StartedAt time.Time  `json:"started_at"`
-	Tools     []ToolMeta `json:"tools"`
+	APKPath   string          `json:"apk_path"`
+	APKSHA256 string          `json:"apk_sha256"`
+	Platform  models.Platform `json:"platform"`
+	StartedAt time.Time       `json:"started_at"`
+	Tools     []ToolMeta      `json:"tools"`
 }
 
 // ToolMeta holds per-tool execution metadata.
@@ -49,6 +50,8 @@ type Options struct {
 	FailFast bool
 	// DryRun lists the stages that would run without executing anything.
 	DryRun bool
+	// Platform is the detected target platform (android/ios).
+	Platform models.Platform
 }
 
 // Pipeline orchestrates a sequence of Analyzer stages.
@@ -104,10 +107,16 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		return nil, fmt.Errorf("creating session directory: %w", err)
 	}
 
+	plat := p.opts.Platform
+	if plat == "" {
+		plat = models.PlatformUnknown
+	}
+
 	session := &models.AnalysisSession{
 		ID:        sha256[:16],
 		APKPath:   apkPath,
 		APKHash:   sha256,
+		Platform:  plat,
 		StartedAt: time.Now(),
 		Status:    models.StatusRunning,
 	}
@@ -115,6 +124,7 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	meta := Meta{
 		APKPath:   apkPath,
 		APKSHA256: sha256,
+		Platform:  plat,
 		StartedAt: session.StartedAt,
 	}
 
@@ -263,10 +273,15 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 // dryRun reports what would run without executing anything.
 func (p *Pipeline) dryRun(apkPath, sha256 string, stages []string) *models.AnalysisSession {
+	plat := p.opts.Platform
+	if plat == "" {
+		plat = models.PlatformUnknown
+	}
 	session := &models.AnalysisSession{
 		ID:        sha256[:16],
 		APKPath:   apkPath,
 		APKHash:   sha256,
+		Platform:  plat,
 		StartedAt: time.Now(),
 		Status:    models.StatusPending,
 	}

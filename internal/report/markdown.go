@@ -17,6 +17,7 @@ var markdownTemplate string
 type mdData struct {
 	SessionID string
 	APKPath   string
+	Platform  string
 	Status    string
 	Total     int
 	Counts    map[string]int
@@ -114,6 +115,7 @@ func buildMDData(session *models.AnalysisSession) mdData {
 	return mdData{
 		SessionID: session.ID,
 		APKPath:   session.APKPath,
+		Platform:  string(session.Platform),
 		Status:    string(session.Status),
 		Total:     len(session.Findings),
 		Counts:    counts,
