@@ -4,9 +4,26 @@ Handoff document. Everything below is **not implemented**. Each section states
 the goal, the concrete design (file-level), the acceptance criteria and the
 known pitfalls, so work can resume without re-reading the codebase.
 
-State of `test` at the time of writing: Fases 1–6 of the improvement plan are
-done (config, correctness, security, docker, CI, performance, LLM robustness).
-Coverage 74.2%, `make check` green, `govulncheck` reports 0 reachable vulns.
+State of `test`: Fases 1–6 of the improvement plan are done (config,
+correctness, security, docker, CI, performance, LLM robustness) plus the
+platform/iOS/Android-depth and report/docs items from sections 1, 2, 5 (SARIF)
+and 8 below. `make check` green, `govulncheck` reports 0 reachable vulns.
+
+### Done since the first draft of this document
+
+- [x] §1.1 Platform detection (`internal/platform`)
+- [x] §1.2 Model schema (Platform, RuleID, MASVS/MASTG/MASWE/CWE, AppInventory, new categories)
+- [x] §1.3–1.5 iOS analyzers (ipa-extract, plist, macho, codesign, strings) + `rules/mastg-ios/`
+- [x] §1.6 Wiring (`buildAnalyzers` dispatch, `convertFindings` routes, report header)
+- [x] §2.1 AndroidManifest via `encoding/xml` (typed components, modern permissions, protection levels)
+- [x] §2.2 NSC resolved from the manifest + trust-anchors FP fix + `overridePins`
+- [x] §2.3 `inventory.json` with AppInventory
+- [x] §2.4 `apksigner` + `--expect-sha256`
+- [x] §5 SARIF export (`report.sarif`)
+- [x] §6 `/metrics` (minimal Prometheus text; richer instrumentation still open)
+- [x] §8 README in English with Mermaid + troubleshooting, CHANGELOG, CODE_OF_CONDUCT, issue/PR templates
+- [x] §7 Makefile tool pins, `test-integration` target, deterministic `autoDetect`
+- [x] New secret patterns (OAuth client IDs, GitHub/Slack tokens, private keys)
 
 Conventions used throughout: commits in English, atomic, **no Co-Authored-By**,
 `make check` must pass before delivery. Docs are being standardized in English.
