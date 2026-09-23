@@ -16,6 +16,7 @@ import (
 	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/dedek0/mobiscope/internal/pipeline"
 	"github.com/dedek0/mobiscope/internal/platform"
+	"github.com/dedek0/mobiscope/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +32,7 @@ func newAnalyzeCmd() *cobra.Command {
 		failFast       bool
 		dryRun         bool
 		maxConc        int
+		expectSHA      string
 	)
 
 	cmd := &cobra.Command{
@@ -64,6 +66,17 @@ func newAnalyzeCmd() *cobra.Command {
 				"platform", string(target.Platform),
 				"format", target.Format,
 			)
+
+			if expectSHA != "" {
+				got, err := utils.Sha256File(apkPath)
+				if err != nil {
+					return fmt.Errorf("hashing target: %w", err)
+				}
+				if !strings.EqualFold(got, expectSHA) {
+					return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectSHA, got)
+				}
+				logger.Info("sha256 verified", "sha256", got)
+			}
 
 			var stageFilter []string
 			if stages != "" {

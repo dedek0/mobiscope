@@ -172,6 +172,19 @@ func ConvertPlistFindings(raw []byte, sessionID string) []models.Finding {
 	return findings
 }
 
+// decodePlistMapAny decodes a plist document (XML or binary) into a map.
+func decodePlistMapAny(data []byte) (map[string]interface{}, error) {
+	var v interface{}
+	if _, err := plist.Unmarshal(data, &v); err != nil {
+		return nil, err
+	}
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("plist root is not a dictionary")
+	}
+	return m, nil
+}
+
 func readPlist(path string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {

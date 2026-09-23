@@ -149,7 +149,7 @@ func ParseVersion(binary string) string {
 	}
 	versionMu.Unlock()
 
-	v := "unknown"
+	v := unknownVersion
 	cmd := exec.CommandContext(context.Background(), binary, "--version") //nolint:gosec // G204: binary name comes from a fixed analyzer allowlist
 	if out, err := cmd.Output(); err == nil {
 		lines := strings.SplitN(string(out), "\n", 2)

@@ -9,7 +9,10 @@ import (
 )
 
 // toolVersion is stamped on every in-process analyzer ToolResult.
-const toolVersion = "1.0.0"
+const (
+	toolVersion    = "1.0.0"
+	unknownVersion = "unknown"
+)
 
 // IPAExtractArtifactPath is where ipa-extract unpacks the Payload/<App>.app tree.
 func IPAExtractArtifactPath(workdir string) string {

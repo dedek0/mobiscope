@@ -248,6 +248,16 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	// Phase 6: sort by severity.
 	report.SortFindingsBySeverity(session.Findings)
 
+	// Phase 3b: inventory.json with structured app facts.
+	session.App = p.collectAppInventory(sessionDir)
+	if fp, scheme := p.collectSigning(apkPath); fp != "" || scheme != "" {
+		session.SigningCertFP = fp
+		session.SignatureScheme = scheme
+	}
+	if err := writeJSONFile(filepath.Join(sessionDir, "inventory.json"), session.App); err != nil {
+		p.logger.Error("failed to persist inventory.json", "error", err)
+	}
+
 	// Phase 7: persist artifacts.
 	now := time.Now()
 	session.CompletedAt = &now
@@ -328,6 +338,22 @@ func PersistArtifacts(sessionDir string, session *models.AnalysisSession) error 
 	}
 
 	return nil
+}
+
+// collectAppInventory gathers structured app facts for inventory.json.
+func (p *Pipeline) collectAppInventory(sessionDir string) models.AppInventory {
+	if p.opts.Platform == models.PlatformIOS {
+		return analyzers.IOSAppInfo(sessionDir)
+	}
+	return analyzers.AndroidManifestInfo(sessionDir)
+}
+
+// collectSigning records the APK signing identity when apksigner ran.
+func (p *Pipeline) collectSigning(apkPath string) (string, string) {
+	if p.opts.Platform == models.PlatformIOS {
+		return "", ""
+	}
+	return analyzers.SigningIdentity(apkPath)
 }
 
 // runInventory dispatches to the platform-appropriate inventory analyzer.

@@ -8,19 +8,21 @@ import (
 
 // AnalysisSession represents a complete APK analysis session.
 type AnalysisSession struct {
-	ID          string        `json:"id"          validate:"required"`
-	APKPath     string        `json:"apk_path"    validate:"required"`
-	APKHash     string        `json:"apk_hash"`
-	Platform    Platform      `json:"platform"`
-	PackageName string        `json:"package_name"`
-	VersionName string        `json:"version_name"`
-	App         AppInventory  `json:"app,omitempty"`
-	StartedAt   time.Time     `json:"started_at"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty"`
-	Status      SessionStatus `json:"status"`
-	ToolResults []ToolResult  `json:"tool_results"`
-	Findings    []Finding     `json:"findings"`
-	Summary     string        `json:"summary,omitempty"`
+	ID              string        `json:"id"          validate:"required"`
+	APKPath         string        `json:"apk_path"    validate:"required"`
+	APKHash         string        `json:"apk_hash"`
+	Platform        Platform      `json:"platform"`
+	PackageName     string        `json:"package_name"`
+	VersionName     string        `json:"version_name"`
+	App             AppInventory  `json:"app,omitempty"`
+	SigningCertFP   string        `json:"signing_cert_fp,omitempty"`
+	SignatureScheme string        `json:"signature_scheme,omitempty"`
+	StartedAt       time.Time     `json:"started_at"`
+	CompletedAt     *time.Time    `json:"completed_at,omitempty"`
+	Status          SessionStatus `json:"status"`
+	ToolResults     []ToolResult  `json:"tool_results"`
+	Findings        []Finding     `json:"findings"`
+	Summary         string        `json:"summary,omitempty"`
 }
 
 // SessionStatus represents the current status of an analysis session.
