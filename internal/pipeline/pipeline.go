@@ -337,7 +337,21 @@ func PersistArtifacts(sessionDir string, session *models.AnalysisSession) error 
 		return fmt.Errorf("writing session.json: %w", err)
 	}
 
+	sarifPath := filepath.Join(sessionDir, "report.sarif")
+	if err := persistSarif(sarifPath, session); err != nil {
+		return fmt.Errorf("writing report.sarif: %w", err)
+	}
+
 	return nil
+}
+
+func persistSarif(path string, session *models.AnalysisSession) error {
+	sr := &report.SARIFReporter{}
+	var buf strings.Builder
+	if err := sr.Render(session, &buf); err != nil {
+		return err
+	}
+	return utils.WriteFile(path, []byte(buf.String()))
 }
 
 // collectAppInventory gathers structured app facts for inventory.json.

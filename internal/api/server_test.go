@@ -222,3 +222,17 @@ func TestBodyLimit_RejectsOversized(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 }
+
+func TestHandleMetrics(t *testing.T) {
+	t.Setenv("MOBISCOPE_API_TOKEN", "")
+	srv := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "mobiscope_build_info")
+	assert.Contains(t, w.Body.String(), "mobiscope_providers")
+	assert.Contains(t, w.Body.String(), "mobiscope_allow_cloud")
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -63,11 +64,16 @@ func (s *Server) buildRouter() *chi.Mux {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Heartbeat("/healthz"))
 	r.Use(limitBody)
 	if s.authToken != "" {
 		r.Use(bearerAuth(s.authToken))
 	}
+
+	r.Get("/metrics", s.handleMetrics)
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("."))
+	})
 
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/llm", func(r chi.Router) {
@@ -85,6 +91,40 @@ func (s *Server) buildRouter() *chi.Mux {
 	})
 
 	return r
+}
+
+// handleMetrics exposes a minimal Prometheus text endpoint. Counters are
+// derived from the configured providers and the LLM cost accumulator; a
+// richer instrumentation pass is tracked in PENDING.md.
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	var b strings.Builder
+	b.WriteString("# HELP mobiscope_build_info Build information.\n")
+	b.WriteString("# TYPE mobiscope_build_info gauge\n")
+	fmt.Fprintf(&b, "mobiscope_build_info{version=%q} 1\n", "dev")
+
+	b.WriteString("# HELP mobiscope_providers Configured LLM providers.\n")
+	b.WriteString("# TYPE mobiscope_providers gauge\n")
+	local, cloud := 0, 0
+	for _, p := range s.providers {
+		if p.IsLocal() {
+			local++
+		} else {
+			cloud++
+		}
+	}
+	fmt.Fprintf(&b, "mobiscope_providers{kind=\"local\"} %d\n", local)
+	fmt.Fprintf(&b, "mobiscope_providers{kind=\"cloud\"} %d\n", cloud)
+
+	b.WriteString("# HELP mobiscope_allow_cloud Whether cloud providers are enabled.\n")
+	b.WriteString("# TYPE mobiscope_allow_cloud gauge\n")
+	allow := 0
+	if s.cfg.LLM.AllowCloud {
+		allow = 1
+	}
+	fmt.Fprintf(&b, "mobiscope_allow_cloud %d\n", allow)
+
+	_, _ = w.Write([]byte(b.String()))
 }
 
 // limitBody rejects oversized request payloads.
