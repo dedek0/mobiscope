@@ -151,7 +151,7 @@ func (v *Verdict) UnmarshalJSON(data []byte) error {
 // Location holds the source location of a finding.
 type Location struct {
 	File    string `json:"file,omitempty"`
-	Line    int    `json:"line,omitempty"`
+	Line    int    `json:"line"`
 	Snippet string `json:"snippet,omitempty"`
 }
 

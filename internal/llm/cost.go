@@ -23,7 +23,7 @@ var PriceTable = map[string]PriceEntry{
 	"gpt-3.5-turbo":    {Per1KInput: 0.0005, Per1KOutput: 0.0015},
 	// Anthropic
 	"claude-sonnet-4":            {Per1KInput: 0.003, Per1KOutput: 0.015},
-	"claude-sonnet-4-20250514":   {Per1KInput: 0.003, Per1KOutput: 0.015},
+	ModelAnthropicDefault:        {Per1KInput: 0.003, Per1KOutput: 0.015},
 	"claude-3-5-sonnet-20241022": {Per1KInput: 0.003, Per1KOutput: 0.015},
 	"claude-3-5-haiku-20241022":  {Per1KInput: 0.001, Per1KOutput: 0.005},
 	"claude-haiku-4-20250514":    {Per1KInput: 0.001, Per1KOutput: 0.005},

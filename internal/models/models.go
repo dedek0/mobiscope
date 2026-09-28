@@ -40,10 +40,54 @@ type ToolResult struct {
 	ToolName  string          `json:"tool_name"  validate:"required"`
 	Version   string          `json:"version"`
 	StartedAt time.Time       `json:"started_at"`
-	Duration  time.Duration   `json:"duration"`
+	Duration  time.Duration   `json:"-"`
 	ExitCode  int             `json:"exit_code"`
+	TimedOut  bool            `json:"timed_out,omitempty"`
 	Output    json.RawMessage `json:"output"`
 	Error     string          `json:"error,omitempty"`
+}
+
+// MarshalJSON emits Duration as a human-readable string ("1.234s") instead
+// of raw nanoseconds. Both the string form and a raw integer are accepted on
+// unmarshal so older artifacts still load.
+func (tr ToolResult) MarshalJSON() ([]byte, error) {
+	type alias ToolResult
+	return json.Marshal(&struct {
+		alias
+		Duration string `json:"duration"`
+	}{
+		alias:    alias(tr),
+		Duration: tr.Duration.String(),
+	})
+}
+
+func (tr *ToolResult) UnmarshalJSON(data []byte) error {
+	type alias ToolResult
+	aux := &struct {
+		*alias
+		Duration json.RawMessage `json:"duration"`
+	}{alias: (*alias)(tr)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if len(aux.Duration) == 0 {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(aux.Duration, &s); err == nil {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return err
+		}
+		tr.Duration = d
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(aux.Duration, &n); err != nil {
+		return err
+	}
+	tr.Duration = time.Duration(n)
+	return nil
 }
 
 // MarshalJSON implements custom JSON marshaling for AnalysisSession.

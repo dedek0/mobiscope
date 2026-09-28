@@ -111,7 +111,7 @@ func TestFinding_ZeroValueOmitempty(t *testing.T) {
 	assert.Contains(t, s, `"title"`)
 }
 
-func TestFinding_LocationOmitempty(t *testing.T) {
+func TestFinding_LocationLineAlwaysPresent(t *testing.T) {
 	f := Finding{
 		ID:       "id00000000000002",
 		Location: Location{},
@@ -119,8 +119,10 @@ func TestFinding_LocationOmitempty(t *testing.T) {
 
 	data, err := json.Marshal(f)
 	require.NoError(t, err)
+	// file/snippet stay omitempty; line is always emitted so that line 0 is
+	// distinguishable from an absent line.
 	assert.NotContains(t, string(data), `"file"`)
-	assert.NotContains(t, string(data), `"line"`)
+	assert.Contains(t, string(data), `"line"`)
 	assert.NotContains(t, string(data), `"snippet"`)
 }
 

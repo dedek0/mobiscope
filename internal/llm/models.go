@@ -63,7 +63,7 @@ func (r *Registry) registerDefaults() {
 			Capabilities:  Capabilities{JSONMode: true, Streaming: true, ToolCalling: true, Vision: true},
 		},
 		{
-			ID:            "claude-sonnet-4",
+			ID:            ModelAnthropicDefault,
 			Provider:      NameAnthropic,
 			DisplayName:   "Claude Sonnet 4",
 			ContextWindow: 200000,

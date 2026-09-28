@@ -10,7 +10,8 @@ const (
 
 // Default model names used when a provider has no configured task model.
 const (
-	ModelOllamaDefault = "qwen2.5-coder:7b"
-	ModelOpenAIDefault = "gpt-4o-mini"
-	ModelGeminiDefault = "gemini-2.0-flash"
+	ModelOllamaDefault    = "qwen2.5-coder:7b"
+	ModelOpenAIDefault    = "gpt-4o-mini"
+	ModelGeminiDefault    = "gemini-2.0-flash"
+	ModelAnthropicDefault = "claude-sonnet-4-20250514"
 )

@@ -183,7 +183,7 @@ func providerDefaultModel(name string) string {
 	case NameOpenAI:
 		return ModelOpenAIDefault
 	case NameAnthropic:
-		return "claude-sonnet-4-20250514"
+		return ModelAnthropicDefault
 	case NameGemini:
 		return ModelGeminiDefault
 	default:

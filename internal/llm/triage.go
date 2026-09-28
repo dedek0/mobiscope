@@ -18,15 +18,12 @@ import (
 type TriageConfig struct {
 	// MaxContextChars limits the code context sent to the LLM.
 	MaxContextChars int
-	// ContextLines is the number of lines before/after the finding line.
-	ContextLines int
 }
 
 // DefaultTriageConfig returns sensible defaults.
 func DefaultTriageConfig() TriageConfig {
 	return TriageConfig{
 		MaxContextChars: 4000,
-		ContextLines:    10,
 	}
 }
 

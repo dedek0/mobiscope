@@ -85,12 +85,6 @@ func (c *Cache) Clear() error {
 	return nil
 }
 
-// Stats returns cache hit/miss statistics.
-type CacheStats struct {
-	Hits   int
-	Misses int
-}
-
 // KeyPath returns the filesystem path for a cache key (for testing).
 func (c *Cache) KeyPath(key string) string {
 	return filepath.Join(c.dir, key+".json")
