@@ -74,7 +74,7 @@ func (s *Strings) Run(_ context.Context, target string, workdir string) (models.
 		rel, _ := filepath.Rel(root, path)
 		strs := extractPrintable(data)
 		for _, st := range strs {
-			all = append(all, rel+"\x00"+st)
+			all = append(all, rel+"|"+st)
 		}
 		return nil
 	})
@@ -103,7 +103,7 @@ func ConvertStringsFindings(raw []byte, sessionID string) []models.Finding {
 
 	var findings []models.Finding
 	for _, entry := range out.Strings {
-		parts := strings.SplitN(entry, "\x00", 2)
+		parts := strings.SplitN(entry, "|", 2)
 		if len(parts) != 2 {
 			continue
 		}

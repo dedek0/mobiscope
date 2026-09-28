@@ -34,9 +34,9 @@ func (inv *InventoryIOS) Analyze(workdir string, sessionID string) []models.Find
 
 	var findings []models.Finding
 
-	infoPath := filepath.Join(bundle, "Info.plist")
-	if data, err := os.ReadFile(infoPath); err == nil { //nolint:gosec
-		findings = append(findings, ConvertPlistFindings(data, sessionID)...)
+	pa := NewPlistAnalyzer()
+	if res, err := pa.Run(context.TODO(), "", workdir); err == nil && res.Output != nil {
+		findings = append(findings, ConvertPlistFindings(res.Output, sessionID)...)
 	}
 
 	// Entitlements via the CodeSign analyzer's logic.
