@@ -18,6 +18,10 @@ import (
 type TriageConfig struct {
 	// MaxContextChars limits the code context sent to the LLM.
 	MaxContextChars int
+	// ManifestContext is the session-level platform config excerpt
+	// (AndroidManifest.xml or Info.plist/entitlements) shown to the model
+	// so it can reason about app configuration, not just the finding line.
+	ManifestContext string
 }
 
 // DefaultTriageConfig returns sensible defaults.
@@ -141,15 +145,16 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 	}
 
 	promptCtx := TriageContext{
-		ID:          f.ID,
-		Category:    string(f.Category),
-		Title:       f.Title,
-		Severity:    string(f.Severity),
-		SourceTool:  f.SourceTool,
-		File:        f.Location.File,
-		Line:        f.Location.Line,
-		Evidence:    f.Evidence,
-		CodeContext: truncated,
+		ID:              f.ID,
+		Category:        string(f.Category),
+		Title:           f.Title,
+		Severity:        string(f.Severity),
+		SourceTool:      f.SourceTool,
+		File:            f.Location.File,
+		Line:            f.Location.Line,
+		Evidence:        f.Evidence,
+		CodeContext:     truncated,
+		ManifestContext: te.cfg.ManifestContext,
 	}
 
 	caps := route.Provider.Capabilities()

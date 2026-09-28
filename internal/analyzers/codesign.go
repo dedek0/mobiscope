@@ -53,7 +53,7 @@ func (c *CodeSign) Run(_ context.Context, target string, workdir string) (models
 		StartedAt: start,
 	}
 
-	bundle := appBundleDir(workdir)
+	bundle := AppBundleDir(workdir)
 	if bundle == "" {
 		result.Duration = time.Since(start)
 		return result, fmt.Errorf("app bundle not found under %s", IPAExtractArtifactPath(workdir))

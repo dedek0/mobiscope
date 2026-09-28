@@ -231,7 +231,7 @@ func AndroidManifestInfo(workdir string) models.AppInventory {
 // IOSAppInfo builds AppInventory for an iOS bundle.
 func IOSAppInfo(workdir string) models.AppInventory {
 	info := models.AppInventory{}
-	bundle := appBundleDir(workdir)
+	bundle := AppBundleDir(workdir)
 	if bundle == "" {
 		return info
 	}

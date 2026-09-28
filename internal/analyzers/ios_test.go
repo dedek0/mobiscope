@@ -55,7 +55,7 @@ func TestIPAExtract_Run(t *testing.T) {
 	assert.NotNil(t, res.Output)
 
 	assert.FileExists(t, filepath.Join(IPAExtractArtifactPath(workdir), "Payload", "My App.app", "Info.plist"))
-	assert.Equal(t, filepath.Join(IPAExtractArtifactPath(workdir), "Payload", "My App.app"), appBundleDir(workdir))
+	assert.Equal(t, filepath.Join(IPAExtractArtifactPath(workdir), "Payload", "My App.app"), AppBundleDir(workdir))
 }
 
 func TestIPAExtract_ZipSlipRejected(t *testing.T) {

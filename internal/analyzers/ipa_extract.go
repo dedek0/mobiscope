@@ -71,7 +71,7 @@ func (e *IPAExtract) Run(ctx context.Context, target string, workdir string) (mo
 
 	raw, _ := json.Marshal(map[string]interface{}{
 		"output_dir": outDir,
-		"app_bundle": appBundleDir(workdir),
+		"app_bundle": AppBundleDir(workdir),
 		"zip_slip":   rejected,
 	})
 	result.Output = raw

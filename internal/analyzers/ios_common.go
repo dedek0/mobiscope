@@ -19,9 +19,9 @@ func IPAExtractArtifactPath(workdir string) string {
 	return filepath.Join(workdir, "extract")
 }
 
-// appBundleDir returns the path to Payload/<Something>.app under an extracted
+// AppBundleDir returns the path to Payload/<Something>.app under an extracted
 // IPA. Returns "" when the bundle cannot be located.
-func appBundleDir(workdir string) string {
+func AppBundleDir(workdir string) string {
 	payload := filepath.Join(IPAExtractArtifactPath(workdir), "Payload")
 	entries, err := os.ReadDir(payload)
 	if err != nil {
@@ -38,7 +38,7 @@ func appBundleDir(workdir string) string {
 // iosSourceRoot is the directory scanned for iOS code/secrets: the extracted
 // app bundle if present, else the workdir.
 func iosSourceRoot(workdir string) string {
-	if dir := appBundleDir(workdir); dir != "" {
+	if dir := AppBundleDir(workdir); dir != "" {
 		return dir
 	}
 	if dir := IPAExtractArtifactPath(workdir); dirExists(dir) {

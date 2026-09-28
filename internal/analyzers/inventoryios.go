@@ -27,7 +27,7 @@ func (inv *InventoryIOS) Run(_ context.Context, _ string, _ string) (models.Tool
 
 // Analyze returns iOS findings for the extracted app bundle.
 func (inv *InventoryIOS) Analyze(workdir string, sessionID string) []models.Finding {
-	bundle := appBundleDir(workdir)
+	bundle := AppBundleDir(workdir)
 	if bundle == "" {
 		return nil
 	}

@@ -120,7 +120,7 @@ func newAnalyzeCmd() *cobra.Command {
 			}
 
 			if triage {
-				if err := runTriage(c, session, logger, triageProvider); err != nil {
+				if err := runTriage(c, session, workdir, logger, triageProvider); err != nil {
 					return fmt.Errorf("triage failed: %w", err)
 				}
 				sessionDir := filepath.Join(workdir, session.ID)
@@ -153,7 +153,7 @@ func newAnalyzeCmd() *cobra.Command {
 	return cmd
 }
 
-func runTriage(c *cobra.Command, session *models.AnalysisSession, logger *slog.Logger, triageProvider string) error {
+func runTriage(c *cobra.Command, session *models.AnalysisSession, workdir string, logger *slog.Logger, triageProvider string) error {
 	cfg, err := loadConfigWithFlags(c)
 	if err != nil {
 		return err
@@ -188,9 +188,13 @@ func runTriage(c *cobra.Command, session *models.AnalysisSession, logger *slog.L
 		MaxDelay:   8 * time.Second,
 	}
 	timeout := time.Duration(cfg.LLM.TimeoutSeconds) * time.Second
-	triageEngine := llm.NewTriageEngineWithRetry(router, cache, cost, llm.DefaultTriageConfig(), retry, timeout, logger)
 
-	if _, err = triageEngine.Triage(c.Context(), session.Findings, nil); err != nil {
+	sessionDir := filepath.Join(workdir, session.ID)
+	codeCtx, triageCfg := pipeline.TriageConfigFor(sessionDir, session.Platform, session.Findings)
+
+	triageEngine := llm.NewTriageEngineWithRetry(router, cache, cost, triageCfg, retry, timeout, logger)
+
+	if _, err = triageEngine.Triage(c.Context(), session.Findings, codeCtx); err != nil {
 		return err
 	}
 	pipeline.PropagateClusterVerdicts(session.Findings)

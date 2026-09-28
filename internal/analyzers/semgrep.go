@@ -204,6 +204,9 @@ func ConvertSemgrepFindings(raw json.RawMessage, sessionID string) []models.Find
 			if title == "" {
 				title = r.RuleID
 			}
+			if title == "" {
+				title = "semgrep finding"
+			}
 			description := r.Message.Text
 			if description == "" {
 				description = r.Message.ID
