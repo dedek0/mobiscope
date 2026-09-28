@@ -140,6 +140,14 @@ var (
 	versionCache = map[string]string{}
 )
 
+// ResetVersionCache clears the memoized binary versions. Tests that swap
+// the toolchain on PATH must call this or they will see stale versions.
+func ResetVersionCache() {
+	versionMu.Lock()
+	versionCache = map[string]string{}
+	versionMu.Unlock()
+}
+
 // ParseVersion runs `<binary> --version` once per binary and returns the first line.
 func ParseVersion(binary string) string {
 	versionMu.Lock()

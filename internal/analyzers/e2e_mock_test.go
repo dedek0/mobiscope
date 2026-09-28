@@ -17,7 +17,11 @@ func withMockBinaries(t *testing.T, dir string) {
 	t.Helper()
 	orig := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+orig)
-	t.Cleanup(func() { _ = os.Setenv("PATH", orig) })
+	ResetVersionCache()
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", orig)
+		ResetVersionCache()
+	})
 }
 
 // writeMockTool writes an executable shell stub that echoes a fixed version
