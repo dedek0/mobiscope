@@ -48,17 +48,29 @@ type ToolResult struct {
 }
 
 // MarshalJSON emits Duration as a human-readable string ("1.234s") instead
-// of raw nanoseconds. Both the string form and a raw integer are accepted on
-// unmarshal so older artifacts still load.
+// of raw nanoseconds, and never lets an empty or invalid Output break
+// serialization of the whole session.
 func (tr ToolResult) MarshalJSON() ([]byte, error) {
 	type alias ToolResult
 	return json.Marshal(&struct {
 		alias
-		Duration string `json:"duration"`
+		Duration string          `json:"duration"`
+		Output   json.RawMessage `json:"output"`
 	}{
 		alias:    alias(tr),
 		Duration: tr.Duration.String(),
+		Output:   safeRaw(tr.Output),
 	})
+}
+
+// safeRaw returns r when it is valid JSON, or JSON null otherwise. RawMessage
+// with empty or truncated content makes json.Marshal fail, which would take
+// the whole AnalysisSession down with it.
+func safeRaw(r json.RawMessage) json.RawMessage {
+	if len(r) == 0 || !json.Valid(r) {
+		return json.RawMessage("null")
+	}
+	return r
 }
 
 func (tr *ToolResult) UnmarshalJSON(data []byte) error {

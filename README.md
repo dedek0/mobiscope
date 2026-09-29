@@ -264,6 +264,45 @@ make check          # fmt + vet + lint + test
 make serve          # run the API on 127.0.0.1:8080
 ```
 
+### Running the tool: local vs Docker
+
+**Local (no Docker)** — needs Go 1.26+ and the external tools:
+
+```bash
+make build
+./bin/mobiscope analyze app.apk
+./bin/mobiscope analyze app.ipa
+./bin/mobiscope serve        # 127.0.0.1:8080
+```
+
+**With Docker** — the image ships the full toolchain (gitleaks, semgrep,
+apktool, jadx, JRE):
+
+```bash
+make docker                       # build the image
+docker compose up -d mobiscope    # serve on 127.0.0.1:8080
+docker compose run --rm mobiscope analyze /app/samples/app.apk
+docker compose run --rm mobiscope analyze /app/samples/app.ipa
+```
+
+### Smoke tests
+
+`make smoke-apk` / `make smoke-ipa` generate synthetic fixtures and assert
+that the expected findings appear. No real app needed.
+
+```bash
+make smoke-apk     # Android: manifest, NSC, secrets, inventory
+make smoke-ipa     # iOS: ATS, entitlements, Mach-O, strings
+make smoke         # both
+
+# Analyze a real app instead
+make test-apk SAMPLE=path/to/app.apk
+make test-ipa SAMPLE=path/to/app.ipa
+```
+
+Expected output ends with `SMOKE PASSED (11/11 checks passed)`. To keep the
+generated fixtures for inspection: `KEEP=1 make smoke-apk`.
+
 Design decisions: `docs/adr/`. Remaining work: [PENDING.md](PENDING.md).
 Changelog: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,12 +51,13 @@ func (g *Gitleaks) Run(ctx context.Context, target string, workdir string) (mode
 		jadxDir = workdir
 	}
 
+	reportPath := filepath.Join(workdir, "gitleaks-report.json")
 	args := []string{
 		"detect",
 		"--source", jadxDir,
 		"--report-format", "json",
+		"--report-path", reportPath,
 		"--no-git",
-		"--quiet",
 	}
 
 	cmdResult, err := g.runner.Run(ctx, gitleaksBinary, args, gitleaksTimeout, nil)
@@ -62,6 +65,11 @@ func (g *Gitleaks) Run(ctx context.Context, target string, workdir string) (mode
 
 	if cmdResult != nil {
 		result.ExitCode = cmdResult.ExitCode
+	}
+	// Prefer the report file: stdout carries banners and logs as well as JSON.
+	if data, readErr := os.ReadFile(reportPath); readErr == nil { //nolint:gosec
+		result.Output = extractJSONArray(string(data))
+	} else if cmdResult != nil {
 		result.Output = extractJSONArray(cmdResult.Stdout)
 	}
 
