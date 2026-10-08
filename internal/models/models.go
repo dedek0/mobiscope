@@ -23,6 +23,9 @@ type AnalysisSession struct {
 	ToolResults     []ToolResult  `json:"tool_results"`
 	Findings        []Finding     `json:"findings"`
 	Summary         string        `json:"summary,omitempty"`
+	// LLMCostUSD is the cumulative cost of LLM triage for this session (0
+	// when triage did not run).
+	LLMCostUSD float64 `json:"llm_cost_usd,omitempty"`
 }
 
 // SessionStatus represents the current status of an analysis session.
@@ -170,6 +173,10 @@ type AppInventory struct {
 	Entitlements map[string]string `json:"entitlements,omitempty"`
 	URLSchemes   []string          `json:"url_schemes,omitempty"`
 	Permissions  []string          `json:"permissions,omitempty"`
+	// URLCount is the total number of generic http(s) URL matches found in
+	// scanned sources; URLs is a bounded unique sample (Android only).
+	URLCount int      `json:"url_count,omitempty"`
+	URLs     []string `json:"urls,omitempty"`
 }
 
 // ObfuscationInfo records code-obfuscation signals and a 0..1 score.

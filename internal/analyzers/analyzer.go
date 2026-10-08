@@ -27,6 +27,19 @@ type Analyzer interface {
 	Run(ctx context.Context, target string, workdir string) (models.ToolResult, error)
 }
 
+// SourceRoot returns the scan root for a session: jadx output when present,
+// then apktool output (apktool-only runs such as `--stages apktool,...`),
+// then the session directory itself. Scanners, the manifest reader and the
+// inventory all resolve through this helper so they agree on one root.
+func SourceRoot(workdir string) string {
+	for _, dir := range []string{JADXArtifactPath(workdir), APKToolArtifactPath(workdir), workdir} {
+		if dirExists(dir) {
+			return dir
+		}
+	}
+	return workdir
+}
+
 // CommandResult holds the output of an executed command.
 type CommandResult struct {
 	Stdout   string

@@ -1,13 +1,13 @@
 package analyzers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,11 +25,32 @@ const (
 	// maxScanFileSize caps per-file reads during pattern scanning so one huge
 	// generated file cannot exhaust memory.
 	maxScanFileSize = 2 << 20
+
+	// maxURLSamples caps the unique URL sample stored in inventory.json.
+	maxURLSamples = 100
 )
 
-type Inventory struct{}
+// urlRe matches generic http(s) URLs. The generic URL rule was demoted from
+// one finding per URL to an aggregate in inventory.json (it flooded reports).
+var urlRe = regexp.MustCompile(`https?://[^\s"'` + "`" + `<>\\)\]}]+`)
+
+// URLAggregate is the aggregate of generic URL occurrences found while
+// scanning: Count is the total number of matches, URLs a bounded, sorted
+// sample of unique normalized values.
+type URLAggregate struct {
+	Count int
+	URLs  []string
+}
+
+type Inventory struct {
+	urls URLAggregate
+}
 
 func NewInventory() *Inventory { return &Inventory{} }
+
+// URLAggregate returns the URL aggregate collected by the last Run/Analyze
+// call on this instance.
+func (inv *Inventory) URLAggregate() URLAggregate { return inv.urls }
 
 func (inv *Inventory) Name() string     { return NameInventory }
 func (inv *Inventory) Available() error { return nil }
@@ -41,16 +62,15 @@ func (inv *Inventory) Run(_ context.Context, _ string, workdir string) (models.T
 		StartedAt: start,
 	}
 
-	jadxDir := JADXArtifactPath(workdir)
-	if !dirExists(jadxDir) {
-		jadxDir = workdir
-	}
+	srcDir := SourceRoot(workdir)
 
 	findings := make([]models.Finding, 0, 16)
 
-	findings = append(findings, inv.analyzeManifest(jadxDir, "")...)
-	findings = append(findings, inv.analyzeNetworkSecurityConfig(jadxDir, "")...)
-	findings = append(findings, inv.scanPatterns(jadxDir, "")...)
+	findings = append(findings, inv.analyzeManifest(srcDir, "")...)
+	findings = append(findings, inv.analyzeNetworkSecurityConfig(srcDir, "")...)
+	scanned, agg := inv.scanPatterns(srcDir, "")
+	findings = append(findings, scanned...)
+	inv.urls = agg
 
 	raw, _ := json.Marshal(findings)
 	result.Output = raw
@@ -59,15 +79,14 @@ func (inv *Inventory) Run(_ context.Context, _ string, workdir string) (models.T
 }
 
 func (inv *Inventory) Analyze(workdir string, sessionID string) []models.Finding {
-	jadxDir := JADXArtifactPath(workdir)
-	if !dirExists(jadxDir) {
-		jadxDir = workdir
-	}
+	srcDir := SourceRoot(workdir)
 
 	findings := make([]models.Finding, 0, 16)
-	findings = append(findings, inv.analyzeManifest(jadxDir, sessionID)...)
-	findings = append(findings, inv.analyzeNetworkSecurityConfig(jadxDir, sessionID)...)
-	findings = append(findings, inv.scanPatterns(jadxDir, sessionID)...)
+	findings = append(findings, inv.analyzeManifest(srcDir, sessionID)...)
+	findings = append(findings, inv.analyzeNetworkSecurityConfig(srcDir, sessionID)...)
+	scanned, agg := inv.scanPatterns(srcDir, sessionID)
+	findings = append(findings, scanned...)
+	inv.urls = agg
 	return findings
 }
 
@@ -111,6 +130,21 @@ var scanRules = []patternRule{
 		Name: "Private Key Block", Category: models.CategorySecret,
 		Severity: models.SeverityCritical, Sensitivity: models.SensitivitySecret,
 		Re: regexp.MustCompile(`-----BEGIN (?:RSA |EC )?PRIVATE KEY-----`),
+	},
+	{
+		Name: "JWT", Category: models.CategorySecret,
+		Severity: models.SeverityHigh, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
+	},
+	{
+		Name: "Azure Storage Connection String", Category: models.CategorySecret,
+		Severity: models.SeverityCritical, Sensitivity: models.SensitivitySecret,
+		Re: regexp.MustCompile(`(?is)(?:DefaultEndpointsProtocol=https?|AccountName=[a-z0-9\-]+)[^"'\s]{0,120}AccountKey=[A-Za-z0-9+/=]{40,}`),
+	},
+	{
+		Name: "Predictable IV (IvParameterSpec)", Category: models.CategoryCodePattern,
+		Severity: models.SeverityMedium, Sensitivity: models.SensitivityInternal,
+		Re: regexp.MustCompile(`IvParameterSpec\(\s*(?:null|new\s+byte\[\s*\d*\s*\]|"[0-9A-Fa-f]{16,}")`),
 	},
 	{
 		Name: "Firebase URL", Category: models.CategorySecret,
@@ -160,8 +194,10 @@ var scanRules = []patternRule{
 	},
 }
 
-func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Finding {
+func (inv *Inventory) scanPatterns(dir string, sessionID string) ([]models.Finding, URLAggregate) {
 	var findings []models.Finding
+	agg := URLAggregate{}
+	seen := make(map[string]bool, maxURLSamples)
 
 	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -191,10 +227,15 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 		content := string(data)
 		relPath, _ := filepath.Rel(dir, path)
 
-		// Count URLs once per file (aggregate, not one finding per URL).
-		urlCount := bytes.Count([]byte(content), []byte("http"))
-		if urlCount > 0 {
-			_ = urlCount // recorded via inventory.json in the pipeline
+		// Aggregate generic URLs: count every match, keep a bounded unique
+		// sample for inventory.json instead of one finding per URL.
+		for _, m := range urlRe.FindAllString(content, -1) {
+			agg.Count++
+			u := strings.TrimRight(m, ".,;:!?)]}")
+			if !seen[u] && len(seen) < maxURLSamples {
+				seen[u] = true
+				agg.URLs = append(agg.URLs, u)
+			}
 		}
 
 		for _, rule := range scanRules {
@@ -209,7 +250,7 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 					}
 				}
 				matchEnd = loc[1]
-				snippet := content[loc[0]:minInt(loc[1], loc[0]+120)]
+				snippet := content[loc[0]:min(loc[1], loc[0]+120)]
 				line := lineCursor
 
 				f := models.Finding{
@@ -231,16 +272,10 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 		return nil
 	})
 
-	return findings
+	sort.Strings(agg.URLs)
+	return findings, agg
 }
 
 func countLines(s string) int {
 	return strings.Count(s, "\n") + 1
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
