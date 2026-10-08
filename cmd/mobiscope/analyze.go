@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,10 +38,10 @@ func newAnalyzeCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "analyze <app>",
+		Use:   "analyze <app> [more apps...]",
 		Short: "Run static analysis on an Android APK or iOS IPA",
-		Long:  "Orchestrates decompilation and analysis tools against the target APK or IPA.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Orchestrates decompilation and analysis tools against one or more target APK/IPA files. Each target gets its own session directory under --workdir.",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			level := slog.LevelInfo
 			if verbose {
@@ -52,31 +54,6 @@ func newAnalyzeCmd() *cobra.Command {
 
 			ctx, stop := signal.NotifyContext(c.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-
-			apkPath := args[0]
-			if err := platform.MustExist(apkPath); err != nil {
-				return err
-			}
-			target, err := platform.Detect(apkPath)
-			if err != nil {
-				return fmt.Errorf("detecting platform: %w", err)
-			}
-			logger.Info("target detected",
-				"path", target.Path,
-				"platform", string(target.Platform),
-				"format", target.Format,
-			)
-
-			if expectSHA != "" {
-				got, err := utils.Sha256File(apkPath)
-				if err != nil {
-					return fmt.Errorf("hashing target: %w", err)
-				}
-				if !strings.EqualFold(got, expectSHA) {
-					return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectSHA, got)
-				}
-				logger.Info("sha256 verified", "sha256", got)
-			}
 
 			var stageFilter []string
 			if stages != "" {
@@ -92,7 +69,6 @@ func newAnalyzeCmd() *cobra.Command {
 				MaxConcurrency: maxConc,
 				FailFast:       failFast,
 				DryRun:         dryRun,
-				Platform:       target.Platform,
 			}
 			if maxConc <= 0 {
 				if cfg, err := loadConfigWithFlags(c); err == nil {
@@ -103,39 +79,53 @@ func newAnalyzeCmd() *cobra.Command {
 				}
 			}
 
-			analyzersList := buildAnalyzers(stageFilter, noRes, target)
-			p := pipeline.NewWithOptions(analyzersList, logger, opts)
-
-			session, err := p.Run(ctx, apkPath, workdir, stageFilter)
-			if err != nil {
-				return fmt.Errorf("pipeline failed: %w", err)
+			results := make([]targetResult, 0, len(args))
+			for _, apkPath := range args {
+				if ctx.Err() != nil {
+					break
+				}
+				res := targetResult{path: apkPath}
+				res.session, res.err = analyzeOne(c, apkPath, workdir, stageFilter, &opts, targetFlags{
+					noRes:          noRes,
+					triage:         triage,
+					triageProvider: triageProvider,
+					dryRun:         dryRun,
+					expectSHA:      expectSHA,
+					logger:         logger,
+					ctx:            ctx,
+				})
+				results = append(results, res)
+				if res.err != nil && failFast {
+					break
+				}
 			}
 
-			if dryRun {
-				fmt.Fprintf(os.Stderr, "Dry run: %d stage(s) would execute\n", len(session.ToolResults))
-				for _, tr := range session.ToolResults {
-					fmt.Fprintf(os.Stderr, "  - %s%s\n", tr.ToolName, tr.Error)
+			if len(results) > 1 {
+				printTargetSummary(results)
+			}
+
+			var failed int
+			var firstErr error
+			for _, r := range results {
+				if r.err != nil {
+					failed++
+					if firstErr == nil {
+						if len(args) > 1 {
+							firstErr = fmt.Errorf("%s: %w", r.path, r.err)
+						} else {
+							firstErr = r.err
+						}
+					}
 				}
+			}
+			switch {
+			case failed == 0:
 				return nil
+			case failed == 1 && len(args) == 1:
+				return firstErr
+			default:
+				return fmt.Errorf("%d of %d target(s) failed: %w", failed, len(args), firstErr)
 			}
-
-			if triage {
-				if err := runTriage(c, session, workdir, logger, triageProvider); err != nil {
-					return fmt.Errorf("triage failed: %w", err)
-				}
-				sessionDir := filepath.Join(workdir, session.ID)
-				if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
-					return fmt.Errorf("persisting triage results: %w", err)
-				}
-			}
-
-			fmt.Fprintf(os.Stderr, "Analysis complete: %s (status: %s)\n", session.ID, session.Status)
-			fmt.Fprintf(os.Stderr, "Findings: %d\n", len(session.Findings))
-			if triage {
-				fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
-			}
-			fmt.Fprintf(os.Stderr, "Artifacts: %s/%s/\n", workdir, session.ID)
-			return nil
 		},
 	}
 
@@ -149,8 +139,110 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "Abort on the first analyzer error")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "List the stages that would run without executing")
 	cmd.Flags().IntVar(&maxConc, "max-concurrency", 0, "Max external tools running at once (default from config)")
+	cmd.Flags().StringVar(&expectSHA, "expect-sha256", "", "Expected SHA-256 of each target (hex); analysis aborts before any tool runs on mismatch")
 
 	return cmd
+}
+
+// targetResult is one entry of the batch summary (see analyze).
+type targetResult struct {
+	path    string
+	session *models.AnalysisSession
+	err     error
+}
+
+// targetFlags carries the per-command options into analyzeOne.
+type targetFlags struct {
+	noRes          bool
+	triage         bool
+	dryRun         bool
+	triageProvider string
+	expectSHA      string
+	logger         *slog.Logger
+	ctx            context.Context
+}
+
+// analyzeOne runs detection, the hash gate, the pipeline and optional triage
+// for a single target and returns its session.
+func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string, opts *pipeline.Options, tf targetFlags) (*models.AnalysisSession, error) {
+	if err := platform.MustExist(apkPath); err != nil {
+		return nil, err
+	}
+	target, err := platform.Detect(apkPath)
+	if err != nil {
+		return nil, fmt.Errorf("detecting platform: %w", err)
+	}
+	tf.logger.Info("target detected",
+		"path", target.Path,
+		"platform", string(target.Platform),
+		"format", target.Format,
+	)
+
+	// Chain-of-custody gate: verify the expected hash before any tool runs.
+	if tf.expectSHA != "" {
+		got, err := utils.Sha256File(apkPath)
+		if err != nil {
+			return nil, fmt.Errorf("hashing target: %w", err)
+		}
+		if !strings.EqualFold(got, tf.expectSHA) {
+			return nil, fmt.Errorf("SHA-256 mismatch: expected %s, got %s", tf.expectSHA, got)
+		}
+		tf.logger.Info("sha256 verified", "sha256", got)
+	}
+
+	targetOpts := *opts
+	targetOpts.Platform = target.Platform
+
+	analyzersList := buildAnalyzers(stageFilter, tf.noRes, target)
+	p := pipeline.NewWithOptions(analyzersList, tf.logger, targetOpts)
+
+	session, err := p.Run(tf.ctx, apkPath, workdir, stageFilter)
+	if err != nil {
+		return session, fmt.Errorf("pipeline failed: %w", err)
+	}
+
+	if tf.dryRun {
+		fmt.Fprintf(os.Stderr, "Dry run: %d stage(s) would execute\n", len(session.ToolResults))
+		for _, tr := range session.ToolResults {
+			fmt.Fprintf(os.Stderr, "  - %s%s\n", tr.ToolName, tr.Error)
+		}
+		return session, nil
+	}
+
+	if tf.triage {
+		if err := runTriage(c, session, workdir, tf.logger, tf.triageProvider); err != nil {
+			return session, fmt.Errorf("triage failed: %w", err)
+		}
+		sessionDir := filepath.Join(workdir, session.ID)
+		if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+			return session, fmt.Errorf("persisting triage results: %w", err)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Analysis complete: %s (status: %s)\n", session.ID, session.Status)
+	fmt.Fprintf(os.Stderr, "Findings: %d\n", len(session.Findings))
+	if tf.triage {
+		fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
+	}
+	fmt.Fprintf(os.Stderr, "Artifacts: %s/%s/\n", workdir, session.ID)
+	return session, nil
+}
+
+// printTargetSummary prints a compact per-target table for batch runs.
+func printTargetSummary(results []targetResult) {
+	fmt.Fprintf(os.Stderr, "\n%-40s %-18s %-10s %s\n", "TARGET", "SESSION", "STATUS", "FINDINGS")
+	for _, r := range results {
+		id, status, findings := "-", "-", "-"
+		if r.session != nil {
+			id = r.session.ID
+			status = string(r.session.Status)
+			findings = strconv.Itoa(len(r.session.Findings))
+		}
+		if r.err != nil {
+			status = "failed"
+		}
+		fmt.Fprintf(os.Stderr, "%-40s %-18s %-10s %s\n", filepath.Base(r.path), id, status, findings)
+	}
 }
 
 func runTriage(c *cobra.Command, session *models.AnalysisSession, workdir string, logger *slog.Logger, triageProvider string) error {
@@ -197,6 +289,7 @@ func runTriage(c *cobra.Command, session *models.AnalysisSession, workdir string
 	if _, err = triageEngine.Triage(c.Context(), session.Findings, codeCtx); err != nil {
 		return err
 	}
+	session.LLMCostUSD = cost.Total()
 	pipeline.PropagateClusterVerdicts(session.Findings)
 	return nil
 }

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake gitleaks for CLI integration tests. Logs argv and writes an empty
+# JSON report at --report-path.
+if [ "$1" = "--version" ]; then echo "8.24.3"; exit 0; fi
+if [ -n "$MOBISCOPE_FAKEBIN_LOG" ]; then echo "gitleaks $*" >> "$MOBISCOPE_FAKEBIN_LOG"; fi
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--report-path" ]; then printf '[]' > "$a"; fi
+  prev="$a"
+done
+exit 0

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake semgrep for CLI integration tests. Logs argv and writes an empty
+# SARIF document at --output.
+if [ "$1" = "--version" ]; then echo "1.127.1"; exit 0; fi
+if [ -n "$MOBISCOPE_FAKEBIN_LOG" ]; then echo "semgrep $*" >> "$MOBISCOPE_FAKEBIN_LOG"; fi
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output" ]; then printf '{"runs":[],"version":"2.1.0"}' > "$a"; fi
+  prev="$a"
+done
+exit 0

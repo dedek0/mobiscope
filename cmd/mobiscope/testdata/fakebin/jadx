@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fake jadx for CLI integration tests. Logs argv and materializes the -d dir.
+if [ "$1" = "--version" ]; then echo "jadx 1.5.1"; exit 0; fi
+if [ -n "$MOBISCOPE_FAKEBIN_LOG" ]; then echo "jadx $*" >> "$MOBISCOPE_FAKEBIN_LOG"; fi
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-d" ]; then
+    mkdir -p "$a"
+    printf 'package com.example;\npublic class Main {}\n' > "$a/Main.java"
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest package="com.example.fake" />\n' > "$a/AndroidManifest.xml"
+  fi
+  prev="$a"
+done
+exit 0

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Fake apktool for CLI integration tests. Logs argv, materializes the -o dir,
+# and exits with FAKE_APKTOOL_EXIT when a failure scenario is requested.
+if [ "$1" = "--version" ]; then echo "2.11.1"; exit 0; fi
+if [ -n "$MOBISCOPE_FAKEBIN_LOG" ]; then echo "apktool $*" >> "$MOBISCOPE_FAKEBIN_LOG"; fi
+if [ "${FAKE_APKTOOL_EXIT:-0}" != "0" ]; then
+  echo "Fake apktool failing on purpose" >&2
+  exit "$FAKE_APKTOOL_EXIT"
+fi
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    mkdir -p "$a/res"
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest package="com.example.fake" />\n' > "$a/AndroidManifest.xml"
+    printf 'versionInfo:\n  versionCode: 1\n  versionName: "1.0"\nsdkInfo:\n  minSdkVersion: 24\n  targetSdkVersion: 34\n' > "$a/apktool.yml"
+  fi
+  prev="$a"
+done
+exit 0
