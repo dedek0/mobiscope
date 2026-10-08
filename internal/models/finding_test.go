@@ -150,10 +150,11 @@ func TestSeverity_UnmarshalJSON(t *testing.T) {
 	assert.Equal(t, SeverityCritical, s)
 }
 
-func TestSeverity_UnmarshalJSON_Invalid(t *testing.T) {
+func TestSeverity_UnmarshalJSON_UnknownAccepted(t *testing.T) {
+	// Unknown values are stored as-is for forward compatibility.
 	var s Severity
-	err := json.Unmarshal([]byte(`"bogus"`), &s)
-	assert.Error(t, err)
+	require.NoError(t, json.Unmarshal([]byte(`"blocker"`), &s))
+	assert.Equal(t, Severity("blocker"), s)
 }
 
 func TestCategory_MarshalJSON(t *testing.T) {
@@ -180,10 +181,10 @@ func TestCategory_UnmarshalJSON(t *testing.T) {
 	assert.Equal(t, CategorySecret, c)
 }
 
-func TestCategory_UnmarshalJSON_Invalid(t *testing.T) {
+func TestCategory_UnmarshalJSON_UnknownAccepted(t *testing.T) {
 	var c Category
-	err := json.Unmarshal([]byte(`"bogus"`), &c)
-	assert.Error(t, err)
+	require.NoError(t, json.Unmarshal([]byte(`"new_future_category"`), &c))
+	assert.Equal(t, Category("new_future_category"), c)
 }
 
 func TestSensitivity_MarshalJSON(t *testing.T) {
@@ -209,10 +210,10 @@ func TestSensitivity_UnmarshalJSON(t *testing.T) {
 	assert.Equal(t, SensitivityConfidential, s)
 }
 
-func TestSensitivity_UnmarshalJSON_Invalid(t *testing.T) {
+func TestSensitivity_UnmarshalJSON_UnknownAccepted(t *testing.T) {
 	var s Sensitivity
-	err := json.Unmarshal([]byte(`"bogus"`), &s)
-	assert.Error(t, err)
+	require.NoError(t, json.Unmarshal([]byte(`"restricted"`), &s))
+	assert.Equal(t, Sensitivity("restricted"), s)
 }
 
 func TestVerdict_MarshalJSON(t *testing.T) {
@@ -237,10 +238,10 @@ func TestVerdict_UnmarshalJSON(t *testing.T) {
 	assert.Equal(t, VerdictConfirmed, v)
 }
 
-func TestVerdict_UnmarshalJSON_Invalid(t *testing.T) {
+func TestVerdict_UnmarshalJSON_UnknownAccepted(t *testing.T) {
 	var v Verdict
-	err := json.Unmarshal([]byte(`"bogus"`), &v)
-	assert.Error(t, err)
+	require.NoError(t, json.Unmarshal([]byte(`"needs_review"`), &v))
+	assert.Equal(t, Verdict("needs_review"), v)
 }
 
 func TestSeverity_String(t *testing.T) {

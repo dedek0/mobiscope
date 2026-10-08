@@ -93,8 +93,10 @@ func TestCategory_NewValuesRoundTrip(t *testing.T) {
 		assert.Equal(t, c, got)
 	}
 
+	// Unknown categories round-trip too (forward compatibility).
 	var got Category
-	require.Error(t, json.Unmarshal([]byte(`"nope"`), &got))
+	require.NoError(t, json.Unmarshal([]byte(`"nope"`), &got))
+	assert.Equal(t, Category("nope"), got)
 }
 
 func TestFinding_StandardsFieldsRoundTrip(t *testing.T) {

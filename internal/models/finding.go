@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -31,13 +30,10 @@ func (s *Severity) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	switch Severity(v) {
-	case SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityInfo:
-		*s = Severity(v)
-		return nil
-	default:
-		return fmt.Errorf("invalid severity: %q", v)
-	}
+	// Accept unknown values so artifacts produced by newer versions remain
+	// readable (forward compatibility). The value is preserved as-is.
+	*s = Severity(v)
+	return nil
 }
 
 // Category represents the category of a security finding.
@@ -56,21 +52,6 @@ const (
 	CategoryPrivacy          Category = "privacy"
 )
 
-// knownCategories is the set accepted by UnmarshalJSON. New categories must
-// be added here or previously-persisted findings will fail to parse.
-var knownCategories = map[Category]struct{}{
-	CategorySecret:           {},
-	CategoryCodePattern:      {},
-	CategoryManifestIssue:    {},
-	CategoryNetworkConfig:    {},
-	CategoryPinningIndicator: {},
-	CategoryEntitlement:      {},
-	CategoryBinaryHardening:  {},
-	CategoryObfuscation:      {},
-	CategoryNativeCode:       {},
-	CategoryPrivacy:          {},
-}
-
 func (c Category) String() string { return string(c) }
 
 func (c Category) MarshalJSON() ([]byte, error) {
@@ -82,11 +63,10 @@ func (c *Category) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if _, ok := knownCategories[Category(v)]; ok {
-		*c = Category(v)
-		return nil
-	}
-	return fmt.Errorf("invalid category: %q", v)
+	// Accept unknown categories so artifacts from newer versions remain
+	// readable (forward compatibility). The value is preserved as-is.
+	*c = Category(v)
+	return nil
 }
 
 // Sensitivity represents the data sensitivity level.
@@ -110,13 +90,8 @@ func (s *Sensitivity) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	switch Sensitivity(v) {
-	case SensitivityPublic, SensitivityInternal, SensitivityConfidential, SensitivitySecret:
-		*s = Sensitivity(v)
-		return nil
-	default:
-		return fmt.Errorf("invalid sensitivity: %q", v)
-	}
+	*s = Sensitivity(v)
+	return nil
 }
 
 // Verdict represents the LLM assessment of a finding.
@@ -139,13 +114,8 @@ func (v *Verdict) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	switch Verdict(s) {
-	case VerdictConfirmed, VerdictLikelyFP, VerdictInconclusive:
-		*v = Verdict(s)
-		return nil
-	default:
-		return fmt.Errorf("invalid verdict: %q", s)
-	}
+	*v = Verdict(s)
+	return nil
 }
 
 // Location holds the source location of a finding.

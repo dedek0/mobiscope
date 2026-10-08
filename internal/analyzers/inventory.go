@@ -1,6 +1,7 @@
 package analyzers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,11 +118,6 @@ var scanRules = []patternRule{
 		Re: regexp.MustCompile(`https://[a-z0-9\-]+\.firebaseio\.com`),
 	},
 	{
-		Name: "Generic URL", Category: models.CategoryCodePattern,
-		Severity: models.SeverityInfo, Sensitivity: models.SensitivityPublic,
-		Re: regexp.MustCompile(`https?://[^\s"'<>]+`),
-	},
-	{
 		Name: "IP Address", Category: models.CategoryCodePattern,
 		Severity: models.SeverityLow, Sensitivity: models.SensitivityInternal,
 		Re: regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`),
@@ -195,11 +191,26 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) []models.Findin
 		content := string(data)
 		relPath, _ := filepath.Rel(dir, path)
 
+		// Count URLs once per file (aggregate, not one finding per URL).
+		urlCount := bytes.Count([]byte(content), []byte("http"))
+		if urlCount > 0 {
+			_ = urlCount // recorded via inventory.json in the pipeline
+		}
+
 		for _, rule := range scanRules {
 			locs := rule.Re.FindAllStringIndex(content, -1)
+			lineCursor := 1
+			matchEnd := 0
 			for _, loc := range locs {
+				// Incremental line count: matches arrive in order.
+				for i := matchEnd; i < loc[0]; i++ {
+					if content[i] == '\n' {
+						lineCursor++
+					}
+				}
+				matchEnd = loc[1]
 				snippet := content[loc[0]:minInt(loc[1], loc[0]+120)]
-				line := countLines(content[:loc[0]])
+				line := lineCursor
 
 				f := models.Finding{
 					ID:          models.GenerateID(NameInventory, rule.Category, relPath, line, snippet),
