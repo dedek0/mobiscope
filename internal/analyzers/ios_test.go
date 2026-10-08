@@ -80,6 +80,52 @@ func TestIPAExtract_ZipSlipRejected(t *testing.T) {
 	assert.NoFileExists(t, "/etc/evil")
 }
 
+// TestIPAExtract_SymlinkEntryRejected ensures symlink entries inside the
+// archive are never materialized on disk (they could point anywhere once
+// extracted) and are reported as zip-slip findings instead.
+func TestIPAExtract_SymlinkEntryRejected(t *testing.T) {
+	workdir := t.TempDir()
+	ipa := filepath.Join(workdir, "app.ipa")
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("Payload/My App.app/Info.plist")
+	require.NoError(t, err)
+	_, err = w.Write([]byte("<plist><dict/></plist>"))
+	require.NoError(t, err)
+
+	// A symlink entry pointing outside the extraction directory.
+	hdr := &zip.FileHeader{Name: "Payload/My App.app/evil-link", Method: zip.Store}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	lw, err := zw.CreateHeader(hdr)
+	require.NoError(t, err)
+	_, err = lw.Write([]byte("/etc/passwd"))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	require.NoError(t, os.WriteFile(ipa, buf.Bytes(), 0o600))
+
+	e := NewIPAExtract()
+	res, err := e.Run(context.Background(), ipa, workdir)
+	require.NoError(t, err)
+
+	findings := ConvertIPAExtractFindings(res.Output, "s")
+	require.NotEmpty(t, findings, "symlink entry must be reported")
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Title, "Zip-slip") {
+			found = true
+		}
+		assert.Equal(t, "manifest_issue", string(f.Category))
+	}
+	assert.True(t, found)
+
+	// The link itself must not exist as a symlink (or at all).
+	info, err := os.Lstat(filepath.Join(IPAExtractArtifactPath(workdir), "Payload", "My App.app", "evil-link"))
+	if err == nil {
+		assert.False(t, info.Mode()&os.ModeSymlink != 0, "symlink must not be materialized")
+	}
+}
+
 func TestIPAExtract_TooManyEntries(t *testing.T) {
 	workdir := t.TempDir()
 	path := filepath.Join(workdir, "app.ipa")

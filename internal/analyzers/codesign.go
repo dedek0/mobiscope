@@ -152,8 +152,41 @@ func ConvertCodeSignFindings(raw []byte, sessionID string) []models.Finding {
 			"aps-environment=development in a shipped build means push tokens are sandboxed and the build was not production-signed.",
 			"aps-environment=development", models.SeverityLow, models.SensitivityInternal, 0.7)
 	}
+	// Wildcard keychain access groups ("*" or "*.suffix") grant every app on
+	// the device read/write access to this app's keychain items.
+	for _, group := range keychainAccessGroups(out.Entitlements) {
+		if group != "*" && !strings.HasPrefix(group, "*.") {
+			continue
+		}
+		add("Wildcard keychain access group",
+			fmt.Sprintf("keychain-access-groups contains %q; any app on the device can read and write this app's keychain items through the wildcard group.", group),
+			"keychain-access-groups="+group, models.SeverityHigh, models.SensitivityConfidential, 0.95)
+	}
 
 	return findings
+}
+
+// keychainAccessGroups extracts the keychain-access-groups entitlement as a
+// string slice. Values arrive as []interface{} after the JSON round-trip, but
+// a lone string is tolerated for robustness.
+func keychainAccessGroups(entitlements map[string]interface{}) []string {
+	raw, ok := entitlements["keychain-access-groups"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		return []string{v}
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // extractPlistFromBytes returns the first embedded plist dictionary found in b.
