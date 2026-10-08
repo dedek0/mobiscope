@@ -22,6 +22,26 @@ type mdData struct {
 	Total     int
 	Counts    map[string]int
 	Groups    []mdGroup
+
+	// Executive summary fields.
+	ClusterTotal  int
+	TopClusters   []mdClusterRow
+	TopCategories []mdCatRow
+	ToolsRun      int
+	Triaged       int
+	CostUSD       float64
+	LLMRun        bool
+}
+
+type mdClusterRow struct {
+	ID    string
+	Size  int
+	Title string
+}
+
+type mdCatRow struct {
+	Name  string
+	Count int
 }
 
 type mdGroup struct {
@@ -112,6 +132,58 @@ func buildMDData(session *models.AnalysisSession) mdData {
 		groups = append(groups, mdGroup{Severity: sev, Findings: bySev[sev]})
 	}
 
+	// Executive summary: clusters, categories, triage state.
+	type clusterInfo struct {
+		size  int
+		title string
+	}
+	clusters := make(map[string]*clusterInfo)
+	catCounts := make(map[string]int)
+	triaged := 0
+	for _, f := range session.Findings {
+		catCounts[string(f.Category)]++
+		if f.LLMVerdict == models.VerdictConfirmed || f.LLMVerdict == models.VerdictLikelyFP {
+			triaged++
+		}
+		if f.ClusterID == "" {
+			continue
+		}
+		ci, ok := clusters[f.ClusterID]
+		if !ok {
+			ci = &clusterInfo{title: f.Title}
+			clusters[f.ClusterID] = ci
+		}
+		ci.size++
+	}
+
+	topClusters := make([]mdClusterRow, 0, len(clusters))
+	for id, ci := range clusters {
+		topClusters = append(topClusters, mdClusterRow{ID: shortID(id), Size: ci.size, Title: ci.title})
+	}
+	sort.Slice(topClusters, func(i, j int) bool {
+		if topClusters[i].Size != topClusters[j].Size {
+			return topClusters[i].Size > topClusters[j].Size
+		}
+		return topClusters[i].ID < topClusters[j].ID
+	})
+	if len(topClusters) > 5 {
+		topClusters = topClusters[:5]
+	}
+
+	topCats := make([]mdCatRow, 0, len(catCounts))
+	for name, n := range catCounts {
+		topCats = append(topCats, mdCatRow{Name: name, Count: n})
+	}
+	sort.Slice(topCats, func(i, j int) bool {
+		if topCats[i].Count != topCats[j].Count {
+			return topCats[i].Count > topCats[j].Count
+		}
+		return topCats[i].Name < topCats[j].Name
+	})
+	if len(topCats) > 5 {
+		topCats = topCats[:5]
+	}
+
 	return mdData{
 		SessionID: session.ID,
 		APKPath:   session.APKPath,
@@ -120,6 +192,14 @@ func buildMDData(session *models.AnalysisSession) mdData {
 		Total:     len(session.Findings),
 		Counts:    counts,
 		Groups:    groups,
+
+		ClusterTotal:  len(clusters),
+		TopClusters:   topClusters,
+		TopCategories: topCats,
+		ToolsRun:      len(session.ToolResults),
+		Triaged:       triaged,
+		CostUSD:       session.LLMCostUSD,
+		LLMRun:        triaged > 0 || session.LLMCostUSD > 0,
 	}
 }
 

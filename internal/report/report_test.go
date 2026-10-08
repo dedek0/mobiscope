@@ -124,6 +124,32 @@ func TestMarkdownReporter_ClusterInfo(t *testing.T) {
 	assert.Contains(t, output, "cl-abc123")
 }
 
+func TestMarkdownReporter_EnglishAndExecutiveSummary(t *testing.T) {
+	session := testSession()
+	session.LLMCostUSD = 0.012345
+	session.Findings[0].LLMVerdict = models.VerdictConfirmed
+	r := &MarkdownReporter{}
+
+	var buf bytes.Buffer
+	require.NoError(t, r.Render(session, &buf))
+	output := buf.String()
+
+	// Report is fully English (docs standard).
+	assert.Contains(t, output, "# mobiscope — Analysis Report")
+	assert.Contains(t, output, "## Executive summary")
+	assert.Contains(t, output, "**Total findings:**")
+	assert.Contains(t, output, "| Severity | Count |")
+	assert.NotContains(t, output, "Relatório")
+	assert.NotContains(t, output, "Severidade")
+
+	// Executive summary carries cluster/category/triage/cost lines.
+	assert.Contains(t, output, "in 1 cluster(s)")
+	assert.Contains(t, output, "Top clusters:")
+	assert.Contains(t, output, "Top categories:")
+	assert.Contains(t, output, "LLM triage:")
+	assert.Contains(t, output, "cost $0.012345")
+}
+
 func TestSortFindingsBySeverity(t *testing.T) {
 	findings := []models.Finding{
 		{Severity: models.SeverityInfo, Location: models.Location{File: "b.java", Line: 1}},
