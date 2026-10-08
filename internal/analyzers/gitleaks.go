@@ -46,15 +46,12 @@ func (g *Gitleaks) Run(ctx context.Context, target string, workdir string) (mode
 		StartedAt: start,
 	}
 
-	jadxDir := JADXArtifactPath(workdir)
-	if !dirExists(jadxDir) {
-		jadxDir = workdir
-	}
+	sourceDir := SourceRoot(workdir)
 
 	reportPath := filepath.Join(workdir, "gitleaks-report.json")
 	args := []string{
 		"detect",
-		"--source", jadxDir,
+		"--source", sourceDir,
 		"--report-format", "json",
 		"--report-path", reportPath,
 		"--no-git",

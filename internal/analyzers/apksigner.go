@@ -135,32 +135,43 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 }
 
 // parseApksignerOutput extracts the fields `apksigner verify --print-certs`
-// prints. Best-effort string scraping.
+// prints. Best-effort string scraping. Order matters: specific lines
+// ("Signer #1 certificate DN/SHA-256 digest") must be matched before any
+// generic "signer #" substring.
 func parseApksignerOutput(out string) (scheme, certFP, signerCount, debug string) {
+	signers := 0
+	explicitSigners := -1
 	for _, line := range strings.Split(out, "\n") {
 		low := strings.ToLower(line)
 		switch {
-		case strings.Contains(low, "verified using v2"):
-			scheme = "v2"
-		case strings.Contains(low, "verified using v3"):
+		case strings.Contains(low, "verified using v3") && strings.Contains(low, ": true"):
 			scheme = "v3"
-		case strings.Contains(low, "verified using v1") && scheme == "":
+		case strings.Contains(low, "verified using v2") && strings.Contains(low, ": true"):
+			scheme = "v2"
+		case strings.Contains(low, "verified using v1") && strings.Contains(low, ": true") && scheme == "":
 			scheme = "v1"
-		case strings.Contains(low, "signer #"):
-			if signerCount == "" {
-				signerCount = "1"
-			} else {
-				signerCount = fmt.Sprintf("%d", atoiSafe(signerCount)+1)
-			}
-		case strings.Contains(low, "signing certificate #1 sha-256 digest:"):
-			certFP = strings.TrimSpace(line[strings.Index(line, ":")+1:])
-		case strings.Contains(low, "signer #1 certificate dn:"):
+		case strings.Contains(low, "number of signers:"):
+			explicitSigners = atoiSafe(strings.TrimSpace(line[strings.Index(line, ":")+1:]))
+		case strings.Contains(low, "signer #") && strings.Contains(low, "certificate dn:"):
+			// One line per signer; the DN also carries the debug flag.
+			signers++
 			if strings.Contains(low, "debug") {
 				debug = "true"
 			}
+		case strings.Contains(low, "sha-256 digest:"):
+			// Covers "Signer #1 certificate SHA-256 digest" and the older
+			// "Signing certificate #1 SHA-256 digest" wording.
+			if certFP == "" {
+				certFP = strings.TrimSpace(line[strings.Index(line, ":")+1:])
+			}
 		}
 	}
-	if signerCount == "" {
+	switch {
+	case explicitSigners >= 0:
+		signerCount = strconv.Itoa(explicitSigners)
+	case signers > 0:
+		signerCount = strconv.Itoa(signers)
+	default:
 		signerCount = "0"
 	}
 	return scheme, certFP, signerCount, debug
@@ -209,9 +220,20 @@ func atoiSafe(s string) int {
 // AppInventory.
 func AndroidManifestInfo(workdir string) models.AppInventory {
 	info := models.AppInventory{}
-	manifestPath := filepath.Join(workdir, "jadx", AndroidManifestFile)
-	if !fileExists(manifestPath) {
-		manifestPath = filepath.Join(workdir, AndroidManifestFile)
+	manifestPath := ""
+	for _, dir := range []string{
+		filepath.Join(workdir, "jadx"),
+		filepath.Join(workdir, "apktool"),
+		workdir,
+	} {
+		candidate := filepath.Join(dir, AndroidManifestFile)
+		if fileExists(candidate) {
+			manifestPath = candidate
+			break
+		}
+	}
+	if manifestPath == "" {
+		return info
 	}
 	data, err := os.ReadFile(manifestPath) //nolint:gosec
 	if err != nil {

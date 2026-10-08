@@ -120,11 +120,7 @@ func sourceRoot(workdir string, plat models.Platform) string {
 	if plat == models.PlatformIOS {
 		return iosRoot(workdir)
 	}
-	jadxDir := analyzers.JADXArtifactPath(workdir)
-	if fileExists(jadxDir) || dirExists(jadxDir) {
-		return jadxDir
-	}
-	return workdir
+	return analyzers.SourceRoot(workdir)
 }
 
 func iosRoot(workdir string) string {

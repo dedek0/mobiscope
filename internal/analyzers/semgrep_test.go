@@ -1,8 +1,12 @@
 package analyzers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/dedek0/mobiscope/internal/models"
@@ -252,4 +256,90 @@ func TestSemgrep_DeterministicID(t *testing.T) {
 	f1 := ConvertSemgrepFindings(raw, "s1")
 	f2 := ConvertSemgrepFindings(raw, "s1")
 	assert.Equal(t, f1[0].ID, f2[0].ID)
+}
+
+// Unlike gitleaks (exit 1 = leaks found = success), semgrep has no
+// "findings found" exit code in this wrapper: every non-zero exit is a tool
+// failure. See gitleaks_test.go TestGitleaks_Run_AcceptsExitCode1 for the
+// contrasting contract.
+func TestSemgrep_Run_RejectsExitCode1(t *testing.T) {
+	runner := NewMockRunner(`{"runs":[]}`, "ran with -sarif", 1)
+	s := NewSemgrepWithRunner("/rules", runner)
+
+	result, err := s.Run(context.Background(), "a.apk", t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "semgrep execution failed")
+	assert.Equal(t, 1, result.ExitCode)
+	assert.NotEmpty(t, result.Error)
+}
+
+func TestSemgrep_Run_RejectsExitCode2(t *testing.T) {
+	runner := NewMockRunner("", "config load failed", 2)
+	s := NewSemgrepWithRunner("/rules", runner)
+
+	result, err := s.Run(context.Background(), "a.apk", t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "semgrep execution failed")
+	assert.Equal(t, 2, result.ExitCode)
+	assert.Contains(t, result.Error, "exited with code 2")
+}
+
+// The SARIF file written via --output wins over stdout, so noisy tool logs
+// cannot corrupt the parsed output.
+func TestSemgrep_Run_PrefersSARIFFileOverStdout(t *testing.T) {
+	workdir := t.TempDir()
+	sarif := `{"runs":[{"results":[{"ruleId":"r1","level":"error","message":{"text":"m"}}]}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(workdir, "semgrep.sarif"), []byte(sarif), 0o600))
+
+	runner := NewMockRunner("WARNING: noisy stdout that is not JSON", "", 0)
+	s := NewSemgrepWithRunner("/rules", runner)
+
+	result, err := s.Run(context.Background(), "a.apk", workdir)
+	require.NoError(t, err)
+	require.NotNil(t, result.Output)
+	assert.JSONEq(t, sarif, string(result.Output))
+
+	findings := ConvertSemgrepFindings(result.Output, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "r1", findings[0].RuleID)
+}
+
+// When the SARIF file is missing, valid JSON on stdout is used as a fallback
+// and must pass through as an object (SARIF), not be wrapped into an array.
+func TestSemgrep_Run_StdoutJSONFallback(t *testing.T) {
+	runner := NewMockRunner(`{"runs":[{"results":[]}]}`, "log line", 0)
+	s := NewSemgrepWithRunner("/rules", runner)
+
+	result, err := s.Run(context.Background(), "a.apk", t.TempDir())
+	require.NoError(t, err)
+	require.NotNil(t, result.Output)
+	assert.True(t, json.Valid(result.Output))
+	assert.True(t, bytes.HasPrefix(bytes.TrimSpace(result.Output), []byte("{")),
+		"SARIF object must not be rewrapped into an array")
+
+	// The converter must see real SARIF from the fallback.
+	findings := ConvertSemgrepFindings(result.Output, "s")
+	require.Len(t, findings, 0)
+}
+
+// Mock-binary variant: a real semgrep stub on PATH exiting 1 must fail,
+// exiting 0 must succeed — mirroring TestMockToolchain_GitleaksExitCodes.
+func TestMockToolchain_SemgrepExitCodes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stubs")
+	}
+	dir := t.TempDir()
+	writeMockTool(t, dir, "semgrep", "1.127.1", 1)
+	withMockBinaries(t, dir)
+
+	s := NewSemgrep("rules/mastg")
+	res, err := s.Run(context.Background(), "test.apk", t.TempDir())
+	require.Error(t, err)
+	assert.Equal(t, 1, res.ExitCode)
+	assert.NotEmpty(t, res.Error)
+
+	writeMockTool(t, dir, "semgrep", "1.127.1", 0)
+	res, err = s.Run(context.Background(), "test.apk", t.TempDir())
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.ExitCode)
 }

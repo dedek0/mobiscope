@@ -149,6 +149,14 @@ func ConvertPlistFindings(raw []byte, sessionID string) []models.Finding {
 					domain+" NSExceptionAllowsInsecureHTTPLoads=true",
 					models.CategoryNetworkConfig, models.SeverityHigh, models.SensitivityConfidential, 0.95)
 			}
+			for _, key := range []string{"NSExceptionMinimumTLSVersion", "NSTemporaryExceptionMinimumTLSVersion"} {
+				if v := strOr(m[key]); v != "" && isWeakTLSVersion(v) {
+					add("ATS exception weakens TLS: "+domain,
+						fmt.Sprintf("Domain %q allows TLS below 1.2 via %s=%s.", domain, key, v),
+						fmt.Sprintf("%s %s=%s", domain, key, v),
+						models.CategoryNetworkConfig, models.SeverityMedium, models.SensitivityConfidential, 0.9)
+				}
+			}
 		}
 	}
 
@@ -219,4 +227,15 @@ func usageDescriptionKeys(info map[string]interface{}) []string {
 		}
 	}
 	return keys
+}
+
+// isWeakTLSVersion reports whether an ATS minimum-TLS exception value allows
+// TLS below 1.2 ("1.0"/"1.1"/"TLSv1"/"TLSv1.0"/"TLSv1.1").
+func isWeakTLSVersion(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1.0", "1.1", "tlsv1", "tlsv1.0", "tlsv1.1":
+		return true
+	default:
+		return false
+	}
 }

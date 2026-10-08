@@ -43,10 +43,7 @@ func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (model
 		StartedAt: start,
 	}
 
-	jadxDir := JADXArtifactPath(workdir)
-	if !dirExists(jadxDir) {
-		jadxDir = workdir
-	}
+	sourceDir := SourceRoot(workdir)
 
 	// Write SARIF to a file: stdout mixes logs with JSON and some builds
 	// treat "-" as a literal filename.
@@ -56,7 +53,7 @@ func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (model
 		"--sarif",
 		"--output", outPath,
 		"--quiet",
-		jadxDir,
+		sourceDir,
 	}
 
 	cmdResult, err := s.runner.Run(ctx, semgrepBinary, args, semgrepTimeout, nil)
@@ -77,7 +74,9 @@ func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (model
 	if data, readErr := os.ReadFile(outPath); readErr == nil { //nolint:gosec
 		result.Output = json.RawMessage(data)
 	} else if cmdResult != nil && json.Valid([]byte(cmdResult.Stdout)) {
-		result.Output = extractJSONArray(cmdResult.Stdout)
+		// stdout fallback: pass valid JSON through untouched (SARIF is an
+		// object; only gitleaks emits a JSON array and has its own converter).
+		result.Output = json.RawMessage([]byte(strings.TrimSpace(cmdResult.Stdout)))
 	}
 
 	return result, nil
