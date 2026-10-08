@@ -3,199 +3,292 @@
 # Schema: metadata.category feeds models.Category, metadata.masvs feeds
 # Finding.MASVS, metadata.reference carries the MASWE URL.
 
-- id: mastg-hardcoded-api-key
-  patterns:
-    - pattern-either:
-        - pattern: |
-            $KEY = "..."
-          metavariable-regex:
-            metavariable: $KEY
-            regex: (?i)(key|secret|token|pass|credential|api_key|apikey)
-        - pattern: |
-            $X.putString($KEY, "...")
-          metavariable-regex:
-            metavariable: $KEY
-            regex: (?i)(key|secret|token|pass)
-        - pattern-regex: |
-            (?i)(api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[=:]\s*"[A-Za-z0-9_\-]{16,}"
-  message: Hardcoded API key or secret detected in source code.
-  severity: ERROR
-  languages: [java]
-  metadata:
-    category: secret
+rules:
+  - id: mastg-hardcoded-api-key
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  $KEY = "..."
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: (?i)(key|secret|token|pass|credential|api_key|apikey)
+          - patterns:
+              - pattern: |
+                  $X.putString($KEY, "...")
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: (?i)(key|secret|token|pass)
+          - pattern-regex: |-
+              (?i)(api[_-]?key|secret[_-]?key|auth[_-]?token)\s*[=:]\s*"[A-Za-z0-9_\-]{16,}"
+    message: Hardcoded API key or secret detected in source code.
     severity: ERROR
-    masvs: MASVS-STORAGE-1
-    mastg: [MASTG-TEST-0008]
-    reference: https://mas.owasp.org/MASWE/MASWE-0008/
+    languages: [java]
+    metadata:
+      category: secret
+      severity: ERROR
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0008]
+      reference: https://mas.owasp.org/MASWE/MASWE-0008/
 
-- id: mastg-weak-crypto-md5
-  patterns:
-    - pattern-either:
-        - pattern: MessageDigest.getInstance("MD5")
-        - pattern: |
-            $X.getInstance("MD5", ...)
-  message: Use of MD5 hash algorithm which is cryptographically broken.
-  severity: ERROR
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-weak-crypto-md5
+    patterns:
+      - pattern-either:
+          - pattern: MessageDigest.getInstance("MD5")
+          - pattern: |
+              $X.getInstance("MD5", ...)
+    message: Use of MD5 hash algorithm which is cryptographically broken.
     severity: ERROR
-    masvs: MASVS-CRYPTO-1
-    mastg: [MASTG-TEST-0064]
-    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0064]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
 
-- id: mastg-weak-crypto-sha1
-  patterns:
-    - pattern-either:
-        - pattern: MessageDigest.getInstance("SHA-1")
-        - pattern: MessageDigest.getInstance("SHA1")
-  message: Use of SHA-1 which has known collision attacks.
-  severity: WARNING
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-weak-crypto-sha1
+    patterns:
+      - pattern-either:
+          - pattern: MessageDigest.getInstance("SHA-1")
+          - pattern: MessageDigest.getInstance("SHA1")
+    message: Use of SHA-1 which has known collision attacks.
     severity: WARNING
-    masvs: MASVS-CRYPTO-1
-    mastg: [MASTG-TEST-0065]
-    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0065]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
 
-- id: mastg-insecure-random
-  patterns:
-    - pattern-either:
-        - pattern: new java.util.Random()
-        - pattern: new Random()
-  message: Use of non-cryptographic random number generator for security-sensitive value.
-  severity: WARNING
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-insecure-random
+    patterns:
+      - pattern-either:
+          - pattern: new java.util.Random()
+          - pattern: new Random()
+    message: Use of non-cryptographic random number generator for security-sensitive value.
     severity: WARNING
-    masvs: MASVS-CRYPTO-2
-    mastg: [MASTG-TEST-0068]
-    reference: https://mas.owasp.org/MASWE/MASWE-0027/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-CRYPTO-2
+      mastg: [MASTG-TEST-0068]
+      reference: https://mas.owasp.org/MASWE/MASWE-0027/
 
-- id: mastg-ecb-mode
-  patterns:
-    - pattern-regex: |
-        Cipher\.getInstance\s*\(\s*"[A-Za-z0-9]*/ECB
-    - pattern-regex: |
-        Cipher\.getInstance\s*\(\s*"ECB"
-  message: Use of ECB mode which does not provide semantic security.
-  severity: ERROR
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-ecb-mode
+    patterns:
+      - pattern-either:
+          - pattern-regex: |-
+              Cipher\.getInstance\s*\(\s*"[A-Za-z0-9]*/ECB
+          - pattern-regex: |-
+              Cipher\.getInstance\s*\(\s*"ECB"
+    message: Use of ECB mode which does not provide semantic security.
     severity: ERROR
-    masvs: MASVS-CRYPTO-1
-    mastg: [MASTG-TEST-0063]
-    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
 
-- id: mastg-exported-component
-  patterns:
-    - pattern-regex: |
-        android:exported\s*=\s*"true"
-  message: Component is exported and can be invoked by other applications.
-  severity: INFO
-  languages: [generic]
-  metadata:
-    category: manifest_issue
+  - id: mastg-exported-component
+    patterns:
+      - pattern-regex: |-
+          android:exported\s*=\s*"true"
+    message: Component is exported and can be invoked by other applications.
     severity: INFO
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0057]
-    reference: https://mas.owasp.org/MASWE/MASWE-0055/
+    languages: [generic]
+    metadata:
+      category: manifest_issue
+      severity: INFO
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0057]
+      reference: https://mas.owasp.org/MASWE/MASWE-0055/
 
-- id: mastg-sql-injection
-  patterns:
-    - pattern-either:
-        - pattern: |
-            $DB.rawQuery("..." + $X, ...)
-        - pattern: |
-            $DB.execSQL("..." + $X)
-  message: Potential SQL injection via string concatenation.
-  severity: ERROR
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-sql-injection
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DB.rawQuery("..." + $X, ...)
+          - pattern: |
+              $DB.execSQL("..." + $X)
+    message: Potential SQL injection via string concatenation.
     severity: ERROR
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0058]
-    reference: https://mas.owasp.org/MASWE/MASWE-0019/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0058]
+      reference: https://mas.owasp.org/MASWE/MASWE-0019/
 
-- id: mastg-webview-javascript
-  patterns:
-    - pattern: |
-        $W.getSettings().setJavaScriptEnabled(true)
-  message: WebView has JavaScript enabled, ensure content is trusted.
-  severity: WARNING
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-webview-javascript
+    patterns:
+      - pattern: |
+          $W.getSettings().setJavaScriptEnabled(true)
+    message: WebView has JavaScript enabled, ensure content is trusted.
     severity: WARNING
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0059]
-    reference: https://mas.owasp.org/MASWE/MASWE-0046/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0046/
 
-- id: mastg-trustmanager-bypass
-  patterns:
-    - pattern: |
-        public void checkServerTrusted(X509Certificate[] $CHAIN, String $AUTH) {
-            ...
-        }
-  message: TrustManager implementation does not validate certificates (empty checkServerTrusted).
-  severity: ERROR
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-trustmanager-bypass
+    patterns:
+      - pattern: |
+          public void checkServerTrusted(X509Certificate[] $CHAIN, String $AUTH) {
+              ...
+          }
+    message: TrustManager implementation does not validate certificates (empty checkServerTrusted).
     severity: ERROR
-    masvs: MASVS-NETWORK-2
-    mastg: [MASTG-TEST-0053]
-    reference: https://mas.owasp.org/MASWE/MASWE-0020/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-NETWORK-2
+      mastg: [MASTG-TEST-0053]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
 
-- id: mastg-webview-file-access
-  patterns:
-    - pattern-either:
-        - pattern: |
-            $W.getSettings().setAllowFileAccess(true)
-        - pattern: |
-            $W.getSettings().setAllowUniversalAccessFromFileURLs(true)
-        - pattern: |
-            $W.getSettings().setAllowFileAccessFromFileURLs(true)
-  message: WebView file access from file URLs is enabled; a compromised WebView can read app-private files.
-  severity: HIGH
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-webview-file-access
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $W.getSettings().setAllowFileAccess(true)
+          - pattern: |
+              $W.getSettings().setAllowUniversalAccessFromFileURLs(true)
+          - pattern: |
+              $W.getSettings().setAllowFileAccessFromFileURLs(true)
+    message: WebView file access from file URLs is enabled; a compromised WebView can read app-private files.
+    severity: HIGH
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0046/
+
+  - id: mastg-implicit-pendingintent
+    patterns:
+      - pattern: |
+          PendingIntent.getActivity($CTX, $REQ, $INTENT, ...)
+    message: PendingIntent without explicit mutability flag; an attacker may add flags.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0048]
+      reference: https://mas.owasp.org/MASWE/MASWE-0056/
+
+  - id: mastg-runtime-exec
+    patterns:
+      - pattern-either:
+          - pattern: Runtime.getRuntime().exec(...)
+          - pattern: |
+              new ProcessBuilder(...)
+    message: Runtime command execution; verify inputs are not attacker-controlled.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0073]
+      reference: https://mas.owasp.org/MASWE/MASWE-0058/
+
+  - id: mastg-hostname-verifier-bypass
+    patterns:
+      - pattern: |
+          public boolean verify(String $HOST, SSLSession $SESSION) {
+              ...
+              return true;
+              ...
+          }
+    message: HostnameVerifier always returns true; TLS hostname validation is effectively disabled.
     severity: ERROR
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0059]
-    reference: https://mas.owasp.org/MASWE/MASWE-0046/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-NETWORK-2
+      mastg: [MASTG-TEST-0053]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
 
-- id: mastg-implicit-pendingintent
-  patterns:
-    - pattern: |
-        PendingIntent.getActivity($CTX, $REQ, $INTENT, ...)
-  message: PendingIntent without explicit mutability flag; an attacker may add flags.
-  severity: WARNING
-  languages: [java]
-  metadata:
-    category: code_pattern
-    severity: WARNING
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0048]
-    reference: https://mas.owasp.org/MASWE/MASWE-0056/
+  - id: mastg-webview-addjsinterface
+    patterns:
+      - pattern: |
+          $W.addJavascriptInterface(...)
+    message: addJavascriptInterface exposes a native object to JavaScript; with untrusted content this leads to RCE.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0046/
 
-- id: mastg-runtime-exec
-  patterns:
-    - pattern-either:
-        - pattern: Runtime.getRuntime().exec(...)
-        - pattern: |
-            new ProcessBuilder(...)
-  message: Runtime command execution; verify inputs are not attacker-controlled.
-  severity: WARNING
-  languages: [java]
-  metadata:
-    category: code_pattern
+  - id: mastg-dexclassloader
+    patterns:
+      - pattern-either:
+          - pattern: new DexClassLoader(...)
+          - pattern: new dalvik.system.DexClassLoader(...)
+    message: Dynamic code loading via DexClassLoader; verify the loaded DEX cannot be replaced by an attacker.
     severity: WARNING
-    masvs: MASVS-PLATFORM-1
-    mastg: [MASTG-TEST-0073]
-    reference: https://mas.owasp.org/MASWE/MASWE-0058/
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0073]
+      reference: https://mas.owasp.org/MASWE/MASWE-0058/
+
+  - id: mastg-log-sensitive
+    patterns:
+      - pattern-regex: |-
+          (?i)Log\.(?:v|d|i)\s*\([^)]{0,300}?(?:password|passwd|secret|token|api[_-]?key|authorization|credential|otp\b)
+    message: Potentially sensitive value passed to Log.d/i/v; logs are readable by the user and on rooted devices.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-STORAGE-4
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0009/
+
+  - id: mastg-weak-cipher-des-rc4
+    patterns:
+      - pattern-regex: |-
+          Cipher\.getInstance\s*\(\s*"(?:DES|DESede|DES/[^"]*|RC2|RC4|ARC4|RC4/[^"]*)"
+    message: Use of a broken symmetric cipher (DES/3DES/RC2/RC4); prefer AES-GCM.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0061]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-aes-ecb-default
+    patterns:
+      - pattern-regex: |-
+          Cipher\.getInstance\s*\(\s*"AES"\s*[,)]
+    message: Cipher.getInstance("AES") omits the transformation, defaulting to ECB mode on most providers.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
