@@ -212,8 +212,16 @@ func ConvertSemgrepFindings(raw json.RawMessage, sessionID string) []models.Find
 				description = r.Message.ID
 			}
 
+			masvs := ruleStringSlice(rule.Properties, "masvs")
+			mastg := ruleStringSlice(rule.Properties, "mastg")
+			cwe := ruleStringSlice(rule.Properties, "cwe")
+
 			f := models.Finding{
 				ID:          models.GenerateID("semgrep", category, file, line, snippet),
+				RuleID:      r.RuleID,
+				MASVS:       masvs,
+				MASTG:       mastg,
+				CWE:         cwe,
 				SessionID:   sessionID,
 				SourceTool:  "semgrep",
 				Category:    category,
@@ -288,6 +296,34 @@ func categorySensitivity(c models.Category) models.Sensitivity {
 		return models.SensitivitySecret
 	}
 	return models.SensitivityInternal
+}
+
+// ruleStringSlice extracts a string or []string property from SARIF rule
+// metadata.
+func ruleStringSlice(props map[string]interface{}, key string) []string {
+	if props == nil {
+		return nil
+	}
+	v, ok := props[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch s := v.(type) {
+	case string:
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	case []interface{}:
+		out := make([]string, 0, len(s))
+		for _, item := range s {
+			if str, ok := item.(string); ok && str != "" {
+				out = append(out, str)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func sarifLevelToSeverity(level string) models.Severity {
