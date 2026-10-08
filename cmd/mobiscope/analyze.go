@@ -233,6 +233,9 @@ func buildAnalyzers(stages []string, noRes bool, target *platform.Target) []anal
 		if want("codesign") {
 			list = append(list, analyzers.NewCodeSign())
 		}
+		if want("classdump") {
+			list = append(list, analyzers.NewClassDump())
+		}
 		if want("strings") {
 			list = append(list, analyzers.NewStrings())
 		}

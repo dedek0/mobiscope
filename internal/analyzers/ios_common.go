@@ -9,6 +9,9 @@ import (
 )
 
 // toolVersion is stamped on every in-process analyzer ToolResult.
+// jsonKeyRoot is the shared JSON key for the scanned source root.
+const jsonKeyRoot = "root"
+
 const (
 	toolVersion    = "1.0.0"
 	unknownVersion = "unknown"

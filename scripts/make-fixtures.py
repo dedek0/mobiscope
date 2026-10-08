@@ -163,6 +163,9 @@ def minimal_macho_arm64_encrypted() -> bytes:
     buf[36:40] = struct.pack("<I", 24)
     # cryptid at cmd+16
     buf[48:52] = struct.pack("<I", 1)
+    # Plant an ObjC class symbol so classdump can find it.
+    marker = b"\x00_OBJC_CLASS_$_UIWebView\x00_OBJC_CLASS_$_WKWebView\x00_OBJC_CLASS_$_NSURLConnection\x00"
+    buf[80:80 + len(marker)] = marker
     return bytes(buf)
 
 

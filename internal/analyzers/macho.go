@@ -78,7 +78,7 @@ func (m *MachO) Run(_ context.Context, target string, workdir string) (models.To
 	})
 
 	raw, _ := json.Marshal(map[string]interface{}{
-		"root":        root,
+		jsonKeyRoot:   root,
 		"native_libs": libs,
 		"binaries":    binaries,
 	})

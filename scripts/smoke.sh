@@ -139,7 +139,7 @@ PY
 smoke_ipa() {
   local fixture="$1"
   local workdir="$ROOT/targets/smoke-ipa"
-  local stages="ipa-extract,plist,macho,codesign,strings"
+  local stages="ipa-extract,plist,macho,codesign,strings,classdump"
 
   echo
   echo "============================================================"
@@ -202,6 +202,7 @@ PYSEED
   check "private entitlement"  "$session/findings.json" "com.apple.private"
   check "platform=ios"         "$session/session.json"  '"platform": *"ios"'
   check "min OS recorded"      "$session/inventory.json" "14.0"
+  check "dangerous ObjC class" "$session/findings.json" "UIWebView\|NSURLConnection"
 
   section "findings summary"
   python3 - "$session/findings.json" <<'PY'

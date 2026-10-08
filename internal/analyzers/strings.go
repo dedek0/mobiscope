@@ -80,8 +80,8 @@ func (s *Strings) Run(_ context.Context, target string, workdir string) (models.
 	})
 
 	raw, _ := json.Marshal(map[string]interface{}{
-		"root":    root,
-		"strings": all,
+		jsonKeyRoot: root,
+		"strings":   all,
 	})
 	result.Output = raw
 	result.Duration = time.Since(start)

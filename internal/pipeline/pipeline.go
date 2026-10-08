@@ -133,7 +133,7 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	// Phase 1: extractors/decompilers (independent of each other).
 	decompilers := selectByName(filtered, "apktool", "jadx", "ipa-extract")
 	// Phase 2: scanners (read extractor output).
-	scanners := selectByName(filtered, "gitleaks", "semgrep", "plist", "macho", "codesign", "strings")
+	scanners := selectByName(filtered, "gitleaks", "semgrep", "plist", "macho", "codesign", "strings", "classdump")
 
 	runs := make([]analyzerRun, len(filtered))
 	idx := make(map[string]int, len(filtered))
@@ -250,6 +250,10 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	// Phase 3b: inventory.json with structured app facts.
 	session.App = p.collectAppInventory(sessionDir)
+	if session.App.BundleID != "" {
+		session.PackageName = session.App.BundleID
+		session.VersionName = session.App.VersionName
+	}
 	if fp, scheme := p.collectSigning(apkPath); fp != "" || scheme != "" {
 		session.SigningCertFP = fp
 		session.SignatureScheme = scheme
@@ -398,6 +402,8 @@ func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResul
 		return analyzers.ConvertCodeSignFindings(result.Output, sessionID)
 	case "strings":
 		return analyzers.ConvertStringsFindings(result.Output, sessionID)
+	case "classdump":
+		return analyzers.ConvertClassDumpFindings(result.Output, sessionID)
 	}
 
 	return nil
