@@ -13,6 +13,7 @@ import (
 	"github.com/dedek0/mobiscope/internal/config"
 	"github.com/dedek0/mobiscope/internal/llm"
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
+	"github.com/dedek0/mobiscope/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -23,6 +24,7 @@ type Server struct {
 	cfg       *config.Config
 	factory   *llm.Factory
 	providers map[string]llm.Provider
+	registry  *llm.Registry
 	logger    *slog.Logger
 	authToken string
 }
@@ -42,6 +44,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		cfg:       cfg,
 		factory:   factory,
 		providers: providers,
+		registry:  llm.NewRegistry(),
 		logger:    logger,
 		authToken: os.Getenv("MOBISCOPE_API_TOKEN"),
 	}
@@ -58,10 +61,14 @@ func (s *Server) Handler() http.Handler {
 // maxBodyBytes caps request payloads (1 MiB).
 const maxBodyBytes = 1 << 20
 
+// providerKey is the shared JSON/log label for the provider name.
+const providerKey = "provider"
+
 func (s *Server) buildRouter() *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
+	r.Use(withRequestLogger(s.logger))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(limitBody)
@@ -93,9 +100,10 @@ func (s *Server) buildRouter() *chi.Mux {
 	return r
 }
 
-// handleMetrics exposes a minimal Prometheus text endpoint. Counters are
-// derived from the configured providers and the LLM cost accumulator; a
-// richer instrumentation pass is tracked in PENDING.md.
+// handleMetrics exposes a minimal Prometheus text endpoint. Static gauges
+// (build, providers, allow_cloud) are derived from the configuration; the
+// process-wide counters (analyzer durations, findings, LLM calls/cost, cache
+// hit rate) come from internal/metrics.
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	var b strings.Builder
@@ -123,6 +131,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		allow = 1
 	}
 	fmt.Fprintf(&b, "mobiscope_allow_cloud %d\n", allow)
+
+	metrics.WriteProm(&b)
 
 	_, _ = w.Write([]byte(b.String()))
 }
@@ -175,12 +185,14 @@ func bearerAuth(token string) func(http.Handler) http.Handler {
 
 // handleLLMProviders returns all detected providers with their status.
 func (s *Server) handleLLMProviders(w http.ResponseWriter, r *http.Request) {
-	detector := llm.NewDetector(s.logger)
+	detector := llm.NewDetector(requestLogger(r, s.logger))
 	results := detector.DetectAvailable(r.Context(), s.providers)
 	JSONOK(w, results)
 }
 
-// handleLLMProviderModels returns models for a specific provider.
+// handleLLMProviderModels returns models for a specific provider. When the
+// live provider cannot be reached, the static model registry is used as a
+// fallback so the UI can still offer known models.
 func (s *Server) handleLLMProviderModels(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	p, ok := s.providers[name]
@@ -189,15 +201,30 @@ func (s *Server) handleLLMProviderModels(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	log := requestLogger(r, s.logger)
 	models, err := p.Models(r.Context())
 	if err != nil {
+		if reg := s.registry.ListByProvider(name); len(reg) > 0 {
+			log.Warn("provider models unavailable, serving registry fallback",
+				providerKey, name, "error", err)
+			registryModels := make([]llmtypes.ModelInfo, 0, len(reg))
+			for _, m := range reg {
+				registryModels = append(registryModels, llmtypes.ModelInfo{Name: m.ID})
+			}
+			JSONOK(w, map[string]interface{}{
+				providerKey: name,
+				"models":    registryModels,
+				"source":    "registry",
+			})
+			return
+		}
 		JSONError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	JSONOK(w, map[string]interface{}{
-		"provider": name,
-		"models":   models,
+		providerKey: name,
+		"models":    models,
 	})
 }
 
@@ -238,7 +265,8 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 		req.Task = "triage"
 	}
 
-	llmRouter := llm.NewRouter(s.providers, s.cfg.LLM, s.logger)
+	log := requestLogger(r, s.logger)
+	llmRouter := llm.NewRouter(s.providers, s.cfg.LLM, log)
 	task := llmtypes.TaskType(req.Task)
 
 	var route *llm.RouteResult
@@ -281,19 +309,26 @@ func (s *Server) handleLLMTest(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := route.Provider.Chat(r.Context(), chatReq)
 	if err != nil {
+		metrics.RecordLLMCall(route.Provider.Name(), false, 0)
 		JSONError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	cost := llm.EstimateCost(route.Model, resp.Usage)
+	metrics.RecordLLMCall(route.Provider.Name(), true, cost)
+	log.Info("llm test completed",
+		providerKey, route.Provider.Name(),
+		"model", route.Model,
+		"cost_usd", fmt.Sprintf("%.6f", cost),
+	)
 
 	JSONOK(w, map[string]interface{}{
-		"provider": route.Provider.Name(),
-		"model":    route.Model,
-		"response": resp.Content,
-		"usage":    resp.Usage,
-		"cost_usd": cost,
-		"task":     req.Task,
+		providerKey: route.Provider.Name(),
+		"model":     route.Model,
+		"response":  resp.Content,
+		"usage":     resp.Usage,
+		"cost_usd":  cost,
+		"task":      req.Task,
 	})
 }
 
