@@ -25,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # eclipse-temurin on Ubuntu (glibc) rather than Alpine: semgrep does not
 # support musl, and apktool/jadx need a JRE anyway.
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy AS runtime
 
 ARG GITLEAKS_VERSION=8.24.3
 ARG APKTOOL_VERSION=2.11.1
