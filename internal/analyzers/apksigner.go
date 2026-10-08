@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/models"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -225,7 +227,70 @@ func AndroidManifestInfo(workdir string) models.AppInventory {
 	if strings.EqualFold(m.Application.Debuggable, "true") {
 		info.Debuggable = true
 	}
+
+	// apktool.yml carries versionInfo/sdkInfo that the manifest does not.
+	applyApktoolYML(workdir, &info)
 	return info
+}
+
+// apktoolYML is the subset of apktool.yml that matters for inventory.
+type apktoolYML struct {
+	VersionInfo struct {
+		VersionCode any    `yaml:"versionCode"`
+		VersionName string `yaml:"versionName"`
+	} `yaml:"versionInfo"`
+	SDKInfo struct {
+		MinSDKVersion    any `yaml:"minSdkVersion"`
+		TargetSDKVersion any `yaml:"targetSdkVersion"`
+	} `yaml:"sdkInfo"`
+}
+
+// applyApktoolYML fills VersionName/VersionCode/MinOS/TargetSDK from the
+// apktool.yml written next to the decoded manifest.
+func applyApktoolYML(workdir string, info *models.AppInventory) {
+	for _, dir := range []string{
+		filepath.Join(workdir, "apktool"),
+		filepath.Join(workdir, "jadx"),
+		workdir,
+	} {
+		path := filepath.Join(dir, "apktool.yml")
+		data, err := os.ReadFile(path) //nolint:gosec
+		if err != nil {
+			continue
+		}
+		var y apktoolYML
+		if err := yaml.Unmarshal(data, &y); err != nil {
+			continue
+		}
+		if info.VersionName == "" && y.VersionInfo.VersionName != "" {
+			info.VersionName = y.VersionInfo.VersionName
+		}
+		if info.VersionCode == "" {
+			info.VersionCode = scalarString(y.VersionInfo.VersionCode)
+		}
+		if info.MinOS == "" {
+			info.MinOS = scalarString(y.SDKInfo.MinSDKVersion)
+		}
+		if info.TargetSDK == "" {
+			info.TargetSDK = scalarString(y.SDKInfo.TargetSDKVersion)
+		}
+		return
+	}
+}
+
+func scalarString(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case int:
+		return strconv.Itoa(s)
+	case float64:
+		return strconv.FormatFloat(s, 'f', -1, 64)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", s)
+	}
 }
 
 // IOSAppInfo builds AppInventory for an iOS bundle.
