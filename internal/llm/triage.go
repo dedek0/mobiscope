@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
+	"github.com/dedek0/mobiscope/internal/metrics"
 	"github.com/dedek0/mobiscope/internal/models"
 )
 
@@ -192,6 +193,7 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 	})
 	cancel()
 	if err != nil {
+		metrics.RecordLLMCall(route.Provider.Name(), false, 0)
 		return fmt.Errorf("chat failed: %w", err)
 	}
 	if te.cost != nil {
@@ -217,7 +219,7 @@ func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw
 		triageResp, err = extractJSONFromText(string(raw))
 		if err != nil {
 			te.logger.Warn("failed to parse triage response, marking inconclusive",
-				"finding", f.ID, "raw", string(raw)[:minInt(len(string(raw)), 200)])
+				"finding", f.ID, "raw", string(raw)[:min(len(string(raw)), 200)])
 			f.LLMVerdict = models.VerdictInconclusive
 			f.LLMExplanation = "failed to parse LLM response"
 			f.LLMRawResponse = string(raw)
@@ -266,13 +268,6 @@ func extractJSONFromText(text string) (TriageResponse, error) {
 	}
 
 	return TriageResponse{}, fmt.Errorf("no valid JSON found in response")
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ExtractCodeContext extracts a window of lines around the finding location.

@@ -16,8 +16,6 @@ type Preset struct {
 	NeedsKey bool
 	// IsLocal indicates whether the provider runs locally.
 	IsLocal bool
-	// APIVersionHeader is set for Azure-style APIs that require api-version.
-	APIVersionHeader bool
 	// DefaultModel is the model to use if none is specified.
 	DefaultModel string
 }
@@ -86,12 +84,11 @@ var Presets = map[string]Preset{
 		DefaultModel: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
 	},
 	"azure": {
-		DisplayName:      "Azure OpenAI",
-		BaseURL:          "", // Must be set by user.
-		NeedsKey:         true,
-		IsLocal:          false,
-		APIVersionHeader: true,
-		DefaultModel:     "gpt-4o",
+		DisplayName:  "Azure OpenAI",
+		BaseURL:      "", // Must be set by user (include ?api-version=... if required).
+		NeedsKey:     true,
+		IsLocal:      false,
+		DefaultModel: "gpt-4o",
 	},
 	"fireworks": {
 		DisplayName:  "Fireworks AI",

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/dedek0/mobiscope/internal/metrics"
 )
 
 // Cache provides a file-based cache for LLM responses.
@@ -46,31 +48,59 @@ func (c *Cache) Get(key string) *json.RawMessage {
 	path := filepath.Join(c.dir, key+".json")
 	info, err := os.Stat(path)
 	if err != nil {
+		metrics.RecordCacheLookup(false)
 		return nil
 	}
 
 	if c.ttl > 0 && time.Since(info.ModTime()) > c.ttl {
 		os.Remove(path)
+		metrics.RecordCacheLookup(false)
 		return nil
 	}
 
 	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
+		metrics.RecordCacheLookup(false)
+		return nil
+	}
+	if len(data) == 0 || !json.Valid(data) {
+		// Corrupt entry: treat as a miss so callers recompute.
+		metrics.RecordCacheLookup(false)
 		return nil
 	}
 
 	raw := json.RawMessage(data)
+	metrics.RecordCacheLookup(true)
 	return &raw
 }
 
 // Set stores a raw JSON response in the cache. The value must be valid JSON;
-// non-JSON payloads are rejected so callers cannot poison the cache.
+// non-JSON payloads are rejected so callers cannot poison the cache. The
+// write is atomic (temp file + rename) so concurrent Get callers never see a
+// truncated file.
 func (c *Cache) Set(key string, value json.RawMessage) error {
 	if len(value) == 0 || !json.Valid(value) {
 		return fmt.Errorf("cache value is not valid JSON")
 	}
 	path := filepath.Join(c.dir, key+".json")
-	return os.WriteFile(path, value, 0o600)
+	tmp, err := os.CreateTemp(c.dir, key+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating cache temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	_, werr := tmp.Write(value)
+	if cerr := tmp.Close(); cerr != nil && werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("writing cache entry: %w", werr)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("committing cache entry: %w", err)
+	}
+	return nil
 }
 
 // Clear removes all cached entries.

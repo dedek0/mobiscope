@@ -1,7 +1,9 @@
 package mock
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"testing"
 	"time"
@@ -100,6 +102,28 @@ func TestMockProvider_ChatStream(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "mock")
 	assert.Contains(t, string(data), "done")
+}
+
+func TestMockProvider_ChatStream_HonorsChatFunc(t *testing.T) {
+	m := New(WithChatFunc(func(_ context.Context, req llmtypes.ChatRequest) (*llmtypes.ChatResponse, error) {
+		return &llmtypes.ChatResponse{Content: `{"verdict":"confirmed"}`, Model: req.Model}, nil
+	}))
+
+	stream, err := m.ChatStream(context.Background(), llmtypes.ChatRequest{Model: "scripted"})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	data, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	// The first NDJSON chunk must carry the scripted content verbatim
+	// (JSON-escaped inside the chunk envelope).
+	firstLine := data[:bytes.IndexByte(data, '\n')]
+	var chunk llmtypes.StreamChunk
+	require.NoError(t, json.Unmarshal(firstLine, &chunk))
+	assert.Equal(t, `{"verdict":"confirmed"}`, chunk.Content)
+	assert.False(t, chunk.Done)
+	assert.Len(t, m.ChatCalls(), 1, "stream calls are recorded like Chat calls")
 }
 
 func TestMockProvider_Latency(t *testing.T) {

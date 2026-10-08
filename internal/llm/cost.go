@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
+	"github.com/dedek0/mobiscope/internal/metrics"
 )
 
 // PriceEntry defines the cost per 1000 tokens for a model.
@@ -74,6 +75,7 @@ func NewCostAccumulator(logger *slog.Logger) *CostAccumulator {
 // Add records a cost entry.
 func (ca *CostAccumulator) Add(provider, model string, usage llmtypes.Usage) float64 {
 	cost := EstimateCost(model, usage)
+	metrics.RecordLLMCall(provider, true, cost)
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()

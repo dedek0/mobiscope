@@ -366,12 +366,6 @@ func TestNewFromPreset_CloudWithKey(t *testing.T) {
 	assert.False(t, p.IsLocal())
 }
 
-func TestNewFromLegacy(t *testing.T) {
-	p := NewFromLegacy("test", "http://localhost:8080/v1", "", testLogger())
-	assert.Equal(t, "test", p.Name())
-	assert.True(t, p.IsLocal())
-}
-
 func TestProvider_HintError_Local(t *testing.T) {
 	p := New(Config{Name: "llamacpp", BaseURL: "http://localhost:8080/v1", Logger: testLogger()})
 	err := p.hintError(assert.AnError)

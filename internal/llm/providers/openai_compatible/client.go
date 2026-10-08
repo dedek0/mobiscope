@@ -94,16 +94,6 @@ func New(cfg Config) *Provider {
 	}
 }
 
-// NewFromLegacy creates a Provider from individual parameters (backwards-compat).
-func NewFromLegacy(name, baseURL, apiKey string, logger *slog.Logger) *Provider {
-	return New(Config{
-		Name:    name,
-		BaseURL: baseURL,
-		APIKey:  apiKey,
-		Logger:  logger,
-	})
-}
-
 // NewFromPreset creates a Provider from a named preset with optional overrides.
 func NewFromPreset(presetName string, apiKey string, overrides *Config, logger *slog.Logger) (*Provider, error) {
 	preset, ok := Presets[presetName]
@@ -318,32 +308,6 @@ func ReadStreamChunks(r io.Reader) ([]llmtypes.StreamChunk, error) {
 		chunks = append(chunks, chunk)
 	}
 	return chunks, scanner.Err()
-}
-
-// ProbeCapabilities tests which capabilities actually work with this endpoint.
-func (p *Provider) ProbeCapabilities(ctx context.Context) llmtypes.Capabilities {
-	caps := p.caps
-
-	// Probe JSON mode with a minimal request.
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	_, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:               p.defaultModel(),
-		MaxCompletionTokens: 1,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleUser, Content: "ok"},
-		},
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		},
-	})
-	if err != nil {
-		p.logger.Debug("JSON mode probe failed", "provider", p.name, "error", err)
-		caps.JSONMode = false
-	}
-
-	return caps
 }
 
 func (p *Provider) defaultModel() string {

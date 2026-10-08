@@ -6,6 +6,7 @@ package mock
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -111,8 +112,28 @@ func (m *Provider) Chat(ctx context.Context, req llmtypes.ChatRequest) (*llmtype
 	}, nil
 }
 
-func (m *Provider) ChatStream(_ context.Context, req llmtypes.ChatRequest) (io.ReadCloser, error) {
+func (m *Provider) ChatStream(ctx context.Context, req llmtypes.ChatRequest) (io.ReadCloser, error) {
 	m.sleep()
+	m.mu.Lock()
+	m.chatCalls = append(m.chatCalls, req)
+	m.mu.Unlock()
+
+	if m.chatFunc != nil {
+		// Honor the injected chat function: synthesize a one-chunk stream
+		// from its response so tests can script streaming behavior too.
+		resp, err := m.chatFunc(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		content, err := json.Marshal(resp.Content)
+		if err != nil {
+			return nil, err
+		}
+		stream := `{"content":` + string(content) + `,"done":false}` + "\n" +
+			`{"content":"","done":true}` + "\n"
+		return io.NopCloser(strings.NewReader(stream)), nil
+	}
+
 	chunks := []byte(`{"content":"mock ","done":false}` + "\n" +
 		`{"content":"stream","done":false}` + "\n" +
 		`{"content":"","done":true}` + "\n")
