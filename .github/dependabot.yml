@@ -1,10 +1,14 @@
 version: 2
+# Dependabot is configured but PR creation is disabled (limit 0) — the
+# initial run flooded the repo with 10+ PRs. To re-enable version-update PRs
+# (one grouped PR per ecosystem), set open-pull-requests-limit back to 5.
+# Security alerts are unaffected by this limit.
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - dependencies
     groups:
@@ -15,7 +19,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - dependencies
     groups:
@@ -26,7 +30,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - dependencies
     groups:
