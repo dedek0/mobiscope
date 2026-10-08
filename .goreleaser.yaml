@@ -1,0 +1,51 @@
+version: 2
+
+project_name: mobiscope
+
+builds:
+  - id: mobiscope
+    main: ./cmd/mobiscope
+    binary: mobiscope
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # Same version mechanism as the Makefile LDFLAGS (main.version,
+    # main.commit, main.buildTime in cmd/mobiscope).
+    ldflags:
+      - "-s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.buildTime={{ .Date }}"
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs"
+      - "^chore"
+      - "^test"
+
+release:
+  draft: false

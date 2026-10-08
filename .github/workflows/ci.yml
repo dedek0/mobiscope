@@ -22,7 +22,7 @@ jobs:
 
       - name: gofumpt
         run: |
-          go install mvdan.cc/gofumpt@latest
+          go install mvdan.cc/gofumpt@v0.8.0
           test -z "$(gofumpt -l .)" || { echo "gofumpt needed on:"; gofumpt -l .; exit 1; }
 
       - name: go vet
@@ -119,3 +119,31 @@ jobs:
           curl -fsS http://127.0.0.1:18080/healthz
           docker logs mobiscope-ci
           docker rm -f mobiscope-ci
+
+  macos-ios-tools:
+    name: macos-ios-tools
+    runs-on: macos-latest
+    # Soft-fail: exercises darwin-only tools (otool/codesign/plutil/ditto/
+    # class-dump) without blocking the pipeline.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: darwin tool versions
+        run: |
+          xcrun otool 2>&1 | head -1 || true
+          codesign --version 2>&1 | head -1 || true
+          plutil -help 2>&1 | head -1 || true
+          ditto 2>&1 | head -1 || true
+          command -v class-dump >/dev/null 2>&1 && class-dump --version 2>&1 | head -1 || echo "class-dump not installed (optional)"
+
+      - name: iOS analyzer tests (darwin subset)
+        run: go test ./internal/analyzers/ -run 'Plist|CodeSign|MachO|Classdump|ClassDump|IOS|IPAExtract|InventoryIOS' -count=1
+
+      - name: platform tests
+        run: go test ./internal/platform/ -count=1
