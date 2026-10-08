@@ -28,6 +28,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `analyze --expect-sha256` gate, `--fail-fast`, `--dry-run`,
   `--max-concurrency`; graceful shutdown on SIGINT/SIGTERM.
 - Parallel analyzer execution (errgroup + `pipeline.max_concurrency`).
+- Batch mode: `analyze a.apk b.ipa …` runs several targets in one command
+  with per-target session dirs and a summary table.
+- `FindingConverter` interface: analyzers convert their own output instead of
+  a growing name switch in the pipeline.
+- Scanner patterns: JWTs, Azure Storage connection strings, predictable IVs
+  (`IvParameterSpec(null)` / `new byte[]` / hex literals).
+- Six semgrep rules: HostnameVerifier bypass, `addJavascriptInterface`,
+  `DexClassLoader`, sensitive `Log.*` calls, DES/RC4 ciphers, and
+  `Cipher.getInstance("AES")` defaulting to ECB.
+- Generic URLs are demoted from findings to an aggregate (`url_count`, `urls`)
+  in `inventory.json`.
+- Richer `/metrics`: analyzer runs/errors/duration per tool, findings by
+  severity/category, LLM calls by provider/result, cumulative LLM cost and
+  cache hit/miss counters (`internal/metrics`), plus `request_id` on API LLM
+  logs and a model-registry fallback for offline provider listings.
+- Executive summary in `report.md` (severity rollup, top clusters/categories,
+  triage count + cost); the Markdown report template is now fully English.
+- `docs/adr/004`–`009` (platform detection, ErrExit, binary allowlist, retry
+  policy, pipeline phases, ASC deferral), `docs/artifacts.md`,
+  `docs/analyzers.md`, goreleaser + release workflow, optional pre-commit
+  hooks, macOS CI soft-fail job for darwin-only tools.
+- Tests: `platform.Detect` fuzzing, `handleLLMTest` routing/cloud refusal,
+  concurrent + corrupt-cache tests, semgrep exit codes, direct
+  `buildAnalyzers`/`runTriage`/`countTriaged` coverage, apksigner parse and
+  mock-binary fixtures, synthetic IPA e2e, fakebin CLI integration tests,
+  ATS matrix and entitlement severity coverage.
+- `keychain-access-groups` wildcard entitlement finding.
 - LLM retry with exponential backoff + jitter, `Retry-After` handling and a
   per-call timeout (`llm.max_retries`, `llm.retry_base_delay_ms`,
   `llm.timeout_seconds`).
@@ -53,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   local providers only.
 - Gitleaks exit code 1 (leaks found) is a success; codes >= 2 are failures.
 - `jadx --no-res` is only passed when `--no-res` is set (previously always).
+- Scanners, the manifest reader and triage context resolve one source root
+  (`analyzers.SourceRoot`: `jadx/` → `apktool/` → session root) instead of
+  each hardcoding the jadx path, so `--stages apktool,…` runs are scanned.
+- LLM cache writes are atomic (temp file + rename) and reads reject corrupt
+  entries as misses.
 
 ### Fixed
 
@@ -67,6 +99,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SafeRmtree` could delete arbitrary paths; symlinks in decompiled trees were
   followed into findings and LLM prompts.
 - Prompt injection via untrusted evidence (now fenced).
+- `--expect-sha256` was enforced but the flag was never registered, so the
+  documented gate was unreachable from the CLI.
+- apksigner: debug-signed detection was shadowed by a generic case (always
+  empty) and signer counts over-counted; only `: true` scheme lines count.
+- semgrep stdout fallback rewrapped a SARIF object into an array the converter
+  could not read.
+- ATS exceptions with a minimum TLS below 1.2 (`NSTemporaryExceptionMinimumTLSVersion`)
+  were not flagged.
+- **Semgrep packs did not load on the pinned 1.127.1**: both packs lacked the
+  top-level `rules:` wrapper (`was not a mapping`), the iOS pack declared the
+  unsupported `objc` language, every `pattern-regex: |` block scalar carried a
+  trailing newline that killed all matches, and `mastg-ecb-mode` ANDed two
+  mutually exclusive regexes. Packs validated end-to-end under
+  `semgrep/semgrep:1.127.1` (all 18 Android rules fire) and guarded by
+  `TestRulePacks_SemgrepSchema`.
 
 ## [0.0.1] - 2026-09-22
 

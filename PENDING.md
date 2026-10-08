@@ -1,13 +1,15 @@
 # Pending Work — mobiscope
 
-Handoff document. Everything below is **not implemented**. Each section states
-the goal, the concrete design (file-level), the acceptance criteria and the
+Handoff document. Items still marked **not implemented** below need work;
+everything else was delivered (see the checklists). Each section states the
+goal, the concrete design (file-level), the acceptance criteria and the
 known pitfalls, so work can resume without re-reading the codebase.
 
 State of `test`: Fases 1–6 of the improvement plan are done (config,
 correctness, security, docker, CI, performance, LLM robustness) plus the
-platform/iOS/Android-depth and report/docs items from sections 1, 2, 5 (SARIF)
-and 8 below. `make check` green, `govulncheck` reports 0 reachable vulns.
+platform/iOS/Android-depth, report/docs items and the §2.5/§3/§4/§7 passes.
+`make check` green, `make test-integration` green, `govulncheck` reports 0
+reachable vulns.
 
 ### Done since the first draft of this document
 
@@ -25,8 +27,64 @@ and 8 below. `make check` green, `govulncheck` reports 0 reachable vulns.
 - [x] §7 Makefile tool pins, `test-integration` target, deterministic `autoDetect`
 - [x] New secret patterns (OAuth client IDs, GitHub/Slack tokens, private keys)
 
+### Done in this pass (branch `test`)
+
+- [x] §2.5 scanner depth in full: incremental line counting, URL aggregate
+      (`url_count`/`urls` in `inventory.json`), JWT/Azure/IV patterns, and the
+      nine code rules in `rules/mastg/rules.yaml` (TrustManager,
+      HostnameVerifier, `setAllowUniversalAccessFromFileURLs`,
+      `addJavascriptInterface`, implicit PendingIntent, `Runtime.exec`,
+      `DexClassLoader`, sensitive `Log.*`, DES/RC4 + `getInstance("AES")`
+      ECB-default).
+- [x] §1.7 iOS test plan: fixture ZIPs, full ATS matrix (incl. weak
+      minimum-TLS exceptions), entitlement severity table incl.
+      `keychain-access-groups` wildcards, category round-trip, synthetic IPA
+      integration test.
+- [x] §3 test gaps: `FuzzDetect`, `handleLLMTest` routing/cloud-refusal,
+      concurrent + corrupt cache, semgrep exit codes, fakebin CLI e2e,
+      apksigner fixtures, direct `buildAnalyzers`/`runTriage`/`countTriaged`
+      coverage. Deferred: `go generate` mocks (hand-written mock stays).
+- [x] §4 documentation: ADRs 004–009, `docs/artifacts.md` (full JSON
+      examples), `docs/analyzers.md` (per-analyzer reference), gitleaks exit
+      codes in troubleshooting, English `report.md` template.
+- [x] §5 quick items: batch mode (`analyze a.apk b.ipa …`), `FindingConverter`
+      interface (no more name switch), network-traffic analysis documented as
+      a non-goal in README.
+- [x] §6 quick items: richer `/metrics` counters (`internal/metrics`),
+      `request_id` pass-through into API LLM logs, executive summary section
+      in `report.md`.
+- [x] §7 leftovers, all of them: dead code wired-or-deleted (`Registry` now
+      backs the offline model listing; `NewFromLegacy`,
+      `ProbeCapabilities`, `Preset.APIVersionHeader` deleted),
+      `mock.Provider.ChatStream` honors `chatFunc`, `minInt` → builtin `min`,
+      gofumpt pin in CI, goreleaser + `release.yml`, pre-commit config,
+      macOS CI soft-fail job.
+- [x] Bug fixes found by the new tests: `--expect-sha256` flag was never
+      registered; apksigner debug detection/signer count; semgrep stdout
+      SARIF fallback; atomic cache writes; `SourceRoot` resolver (jadx →
+      apktool → session root) shared by scanners/manifest/triage context.
+- [x] **Both semgrep packs were unloadable on the pinned 1.127.1** (bare
+      rule lists → `was not a mapping`; `languages: [objc]` → unsupported
+      language; `pattern-regex: |` block scalars carried a trailing newline
+      that made every regex rule a dead matcher; `mastg-ecb-mode` ANDed two
+      mutually exclusive regexes). Fixed: `rules:` wrapper, `|-` chomping,
+      `pattern-either`, objc dropped; `TestRulePacks_SemgrepSchema` guards
+      the format and all 18 Android rules were confirmed to fire under
+      `semgrep/semgrep:1.127.1` in Docker.
+
+### ASC evaluation (decision: defer — ADR-009)
+
+MG1937/ASC (`pip install droidasc`) is a fast on-demand DEX front-end
+(`getclass`/`listclass`/`getmanifest`/`findrefs`). It cannot replace jadx
+here: gitleaks/semgrep/inventory need a **full** decompiled tree and ASC
+emits none, so the default pipeline would not get faster. Value remains for
+targeted `findrefs` enrichment, fast obfuscation class counts and
+`getclass` snippets for triage context — revisit only if a tree-free scan
+mode is designed or the tool stabilizes (it is 0.1.x). See
+`docs/adr/009-defer-asc-decompiler.md`.
+
 Conventions used throughout: commits in English, atomic, **no Co-Authored-By**,
-`make check` must pass before delivery. Docs are being standardized in English.
+`make check` must pass before delivery. Docs are standardized in English.
 
 ---
 
@@ -141,7 +199,11 @@ Mirror `Inventory.Analyze(workdir, sessionID)` so it satisfies
 - Report template: `**App ({{.Platform}}):**` instead of `**APK:**`.
 - Dockerfile: add `unzip`, `libplist-utils`, `llvm`, static `ipsw` + `ldid`.
 
-### 1.7 Test plan for iOS
+### 1.7 Test plan for iOS — DONE
+
+All of the below is implemented (`platform` fixture ZIPs, ATS matrix incl.
+`NSIncludesSubdomains`, entitlement severity table, category round-trip,
+build-tagged synthetic IPA in `internal/pipeline/e2e_test.go`).
 
 - `platform.Detect` unit tests with fixture ZIPs (APK, IPA, garbage, renamed).
 - ATS fixtures: full `NSAppTransportSecurity` matrix.
@@ -199,7 +261,9 @@ WebView flags (`setAllowFileAccess`, `addJavascriptInterface`,
   names (zip-slip), report symlink entries inside the APK.
 - Report header: `app_sha256` + a `SHA256SUMS` file (chain of custody).
 
-### 2.5 Scanner depth
+### 2.5 Scanner depth — DONE
+
+All four bullets below are implemented (see the "Done in this pass" list).
 
 - Size-cap already exists (`maxScanFileSize`); also precompute newline offsets
   per file — `countLines(content[:loc[0]])` is O(n) per match (O(n·m) overall).
@@ -214,7 +278,16 @@ WebView flags (`setAllowFileAccess`, `addJavascriptInterface`,
 
 ---
 
-## 3. Test gaps (medium)
+## 3. Test gaps (medium) — DONE except `go generate` mocks
+
+The suite now covers the rows below (fuzzing incl. `platform.Detect`, fakebin
+CLI e2e, `handleLLMTest`, failure scenarios, concurrent cache, signature
+fixtures, direct `cmd/mobiscope` coverage; e2e runs in CI via
+`make test-integration`). Deferred: replacing the hand-written
+`internal/llm/mock` with `go generate` mocks — low value while the interface
+is stable.
+
+Historical list of what was missing (kept for context):
 
 The suite is good but several classes of bug would slip through:
 
@@ -236,59 +309,57 @@ have no direct tests.
 
 ## 4. Documentation (medium)
 
-Standard is **English** going forward (user decision).
+Standard is **English** (user decision) — DONE except tagging:
 
-- [ ] `README.md` is still largely Portuguese (install/usage/privacy sections).
-      Translate fully; keep `README.pt-BR.md` if a translation is wanted.
-- [ ] `CONTRIBUTING.md` is Portuguese and says "Commits em inglês, docs/UX em
-      pt-BR" — update to the English-docs standard.
-- [ ] `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
-- [ ] Issue templates (bug report, analyzer request, false positive) and
-      `PULL_REQUEST_TEMPLATE.md`.
-- [ ] `CHANGELOG.md` (Keep a Changelog format) + semantic versioning tags.
-      Start at `0.1.0` from the current `test` state.
-- [ ] Mermaid architecture diagram in README (replace the ASCII one).
-- [ ] Troubleshooting section: tool not in PATH, jadx OOM, gitleaks exit codes,
-      semgrep rule pack fails to load, Ollama unreachable, exit code 4 meaning.
-- [ ] Full `findings.json`/`meta.json`/`session.json` examples (README has a
-      partial one; `session.json` is new).
-- [ ] Per-analyzer docs: what each tool extracts, required version, known gaps.
-- [ ] `docs/adr/` — add ADRs for: platform detection, `ErrExit` contract,
-      binary allowlist, retry policy, parallel pipeline phases.
+- [x] `README.md` fully English (+ batch example, non-goals section, docs links)
+- [x] `CONTRIBUTING.md` English
+- [x] `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
+- [x] Issue templates + `PULL_REQUEST_TEMPLATE.md`
+- [x] `CHANGELOG.md` (Keep a Changelog format)
+- [x] Mermaid architecture diagram
+- [x] Troubleshooting section incl. gitleaks exit codes
+- [x] Full `findings.json`/`meta.json`/`session.json`/`inventory.json` examples (`docs/artifacts.md`)
+- [x] Per-analyzer docs (`docs/analyzers.md`)
+- [x] ADRs: 004 platform detection, 005 ErrExit contract, 006 binary
+      allowlist, 007 retry policy, 008 parallel pipeline phases, 009 ASC
+      deferral
+- [ ] Tag `v0.1.0` from a green `test` state (goreleaser + `release.yml` are
+      ready; tagging is a release decision, not code)
 
 ---
 
 ## 5. Architecture & extensibility (low, but planned)
 
-- [ ] **SARIF export** — `Finding` now has `RuleID`/`CWE`/`MASVS` in mind (see
-      §1.2); write `internal/report/sarif.go` mapping to SARIF 2.1.0 runs.
+- [x] **SARIF export** — `internal/report/sarif.go` (SARIF 2.1.0 runs).
 - [ ] **CVSS** — `Finding.CVSSVector`/`CVSSScore`; compute base score from a
       small CVSS v3.1 library or an advisory mapping.
 - [ ] **Vulnerability DBs** — OSV/NVD lookup for `NativeLib.Version` fingerprints.
 - [ ] **SBOM** — CycloneDX via `syft` as an optional stage, or a minimal
       generator over `AppInventory.NativeLibs`.
 - [ ] **Plugin system** — YAML-declared external analyzers first (command,
-      output format, converter); `.so` plugins later if needed. The
-      `FindingConverter` interface from §1.6 is the intermediate step.
-- [ ] **Batch mode** — `analyze a.apk b.ipa …` is trivial after `platform.Detect`;
-      add a summary table and per-target session dirs.
+      output format, converter). The `FindingConverter` interface (done) is
+      the intermediate step; `.so` plugins later if needed.
+- [x] **Batch mode** — `analyze a.apk b.ipa …` with summary table and
+      per-target session dirs.
 - [ ] **Findings dedup across runs** and **version diff** (`mobiscope diff
       old.apk new.apk`) — enabled by deterministic IDs + `AppInventory`.
 - [ ] **Obfuscation analysis** as its own stage (R8/ProGuard detection is §2.3;
       a score is §1.4).
-- [ ] **Network traffic analysis** — out of scope for a static harness; document
-      as a non-goal or integrate mitmproxy as an external stage later.
+- [x] **Network traffic analysis** — documented as a non-goal (README
+      "Scope and non-goals").
 
 ---
 
 ## 6. Observability (low)
 
-- [ ] `/metrics` (Prometheus): per-analyzer duration, findings by
-      category/severity, LLM call success/failure/cost, cache hit rate.
+- [x] `/metrics` (Prometheus): per-analyzer duration/errors, findings by
+      category/severity, LLM calls by provider/result + cumulative cost,
+      cache hit/miss (`internal/metrics`, rendered from the API handler).
 - [ ] OpenTelemetry tracing (optional, behind a flag).
-- [ ] Structured JSON logs already exist (slog) — add a `request_id` attribute
-      pass-through from chi's RequestID middleware into analyzer/LLM logs.
-- [ ] Executive summary section in `report.md` (counts, top clusters, cost).
+- [x] `request_id` pass-through from chi's RequestID middleware into the API's
+      LLM logs (pipeline/CLI logs correlate by `session_id` instead).
+- [x] Executive summary section in `report.md` (severity rollup, top
+      clusters/categories, triage count + cost).
 - [ ] HTML report (`internal/report/html.go` + a template) and/or SARIF viewer link.
 - [ ] Webhooks on completion (Slack/Discord generic incoming webhook).
 - [ ] TUI mode (`bubbletea`) for `analyze --watch` — optional.
@@ -297,35 +368,29 @@ Standard is **English** going forward (user decision).
 
 ## 7. Smaller leftovers from the audit
 
-Worth a cleanup pass; each is small:
+**All items in this section are done** (kept for the record):
 
-- [ ] `AnalysisSession.ToolResult.Duration` marshals as raw nanoseconds — add a
-      custom marshaler emitting a string (`"1.2s"`), and `TimedOut bool`.
-- [ ] `Location.Line` is `int` with `omitempty` — line 0 is indistinguishable
-      from absent. Consider `*int` or drop `omitempty`.
-- [ ] Strict `UnmarshalJSON` on `Severity`/`Category`/… hard-fails on unknown
-      values — accept unknown strings with a warning for forward compatibility
-      (required once iOS categories land).
-- [ ] `llm.Registry`/`NewRegistry`, `openai_compatible.ProbeCapabilities`,
-      `NewFromLegacy`, `Preset.APIVersionHeader`, `ChatStream`/`StreamChunk`
-      have no production caller. Wire or delete.
-- [ ] `TriageConfig.ContextLines` and `ManifestContext` are configured/templated
-      but never populated (`runTriage` passes `codeContext=nil`). Build the map
-      from the decompiled file around `Location.Line` and feed it in.
-- [ ] `CacheStats` promises `Stats()` which does not exist.
-- [ ] `mock.Provider.ChatStream` ignores `chatFunc`.
-- [ ] Non-determinism: `Router.autoDetect` and `Detector` iterate maps — sort
-      keys (partially fixed in `defaultModel` only).
-- [ ] Model-name drift: `Registry` uses `claude-sonnet-4`, `PriceTable` and the
-      Anthropic client use `claude-sonnet-4-20250514`. Unify (price table already
-      has both).
-- [ ] `minInt` duplicated in `inventory.go` and `triage.go`.
-- [ ] `golangci-lint` `install-tools` target installs `@latest` while CI pins
-      `v2.1.6` — pin both.
-- [ ] `Makefile` `test` does not run `-tags integration`; add `test-integration`.
-- [ ] goreleaser for multi-platform releases + a `release.yml` workflow.
-- [ ] pre-commit hooks (optional).
-- [ ] macOS CI job to exercise the darwin-only iOS tools (soft-fail).
+- [x] `AnalysisSession.ToolResult.Duration` custom marshaler (string) + `TimedOut bool`.
+- [x] `Location.Line` `omitempty` dropped (line 0 distinguishable).
+- [x] Lenient `UnmarshalJSON` for `Severity`/`Category`/… (unknown values preserved;
+      caveat: no warning is logged — the models package has no logger).
+- [x] Dead code wired-or-deleted: `llm.Registry` now backs the offline model
+      listing fallback in `handleLLMProviderModels`; `ProbeCapabilities`,
+      `NewFromLegacy` and `Preset.APIVersionHeader` were deleted (the flag was
+      never read — Azure users must put `?api-version=…` in `base_url`);
+      `ChatStream`/`StreamChunk` are kept deliberately — a tested interface
+      capability reserved for streaming consumers (§6 TUI/webhooks).
+- [x] `TriageConfig.ContextLines`/`ManifestContext` populated (`triagecontext.go`).
+- [x] `CacheStats` deleted.
+- [x] `mock.Provider.ChatStream` honors `chatFunc`.
+- [x] Map-iteration determinism in `Router.autoDetect`/`Detector`.
+- [x] Model-name drift unified (`claude-sonnet-4-20250514`).
+- [x] `minInt` duplication removed (builtin `min`, Go ≥ 1.21).
+- [x] golangci-lint pins match between Makefile and CI; gofumpt pinned in CI.
+- [x] `Makefile` `test-integration` target (+ CI job).
+- [x] goreleaser (`release.yml` + `.goreleaser.yaml`).
+- [x] pre-commit hooks (`.pre-commit-config.yaml`, optional).
+- [x] macOS CI job (soft-fail) exercising darwin-only iOS tools.
 
 ---
 
@@ -353,10 +418,13 @@ Worth a cleanup pass; each is small:
 
 ## 9. Suggested next order of work
 
-1. §1.1–§1.2 (platform detection + model schema) — everything else depends on it.
-2. §2.1–§2.2 (Android manifest depth) — highest false-positive/negative win per hour.
-3. §1.3–§1.6 (iOS analyzers + wiring) — the big feature.
-4. §2.3–§2.4 (inventory.json + signing/integrity).
-5. §3 (tests) and §4 (docs/CHANGELOG) before tagging `v0.1.0`.
-6. §5 SARIF export + §6 `/metrics` (small, high visibility).
-7. The rest as needed.
+Remaining open items only:
+
+1. §5: CVSS scoring, OSV/NVD lookups, SBOM, YAML plugin system, cross-run
+   dedup + `mobiscope diff`, obfuscation stage.
+2. §6: HTML report, webhooks, OpenTelemetry, TUI.
+3. Release: tag `v0.1.0` from green `test` (goreleaser workflow ready).
+4. §1.6 tail: platform-aware source resolver for iOS gitleaks/semgrep
+   (today they scan the whole session dir on iOS).
+5. Revisit §8.5 (prompt-injection hardening) and the ASC deferral (ADR-009)
+   only if a tree-free scan mode becomes a goal.

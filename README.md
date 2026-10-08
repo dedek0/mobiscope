@@ -66,6 +66,9 @@ before exposing the API.
 ./bin/mobiscope analyze app.apk
 ./bin/mobiscope analyze app.apk --stages apktool,jadx,gitleaks,semgrep
 
+# Batch: several targets in one run (per-target session dirs + summary table)
+./bin/mobiscope analyze a.apk b.ipa c.apk
+
 # iOS
 ./bin/mobiscope analyze app.ipa
 
@@ -203,6 +206,12 @@ GET  /api/sessions/{id}
 > `MOBISCOPE_API_TOKEN` is set and can trigger billable LLM calls and model
 > downloads. See [SECURITY.md](SECURITY.md).
 
+`GET /metrics` is Prometheus text format: build/provider static gauges plus
+process counters — analyzer runs/errors/duration per tool, findings by
+severity and category, LLM calls by provider and result, cumulative LLM cost
+and cache hit/miss lookups. API handlers log with the chi `request_id` so LLM
+traffic correlates with the access log.
+
 ## Architecture
 
 ```
@@ -220,6 +229,22 @@ internal/
 ├── report/               JSON · Markdown · SARIF
 └── utils/                Filesystem helpers
 ```
+
+Written references: [docs/analyzers.md](docs/analyzers.md) (per-stage
+behavior, versions, gaps), [docs/artifacts.md](docs/artifacts.md) (output
+formats) and [docs/adr/](docs/adr/) (design decisions).
+
+## Scope and non-goals
+
+mobiscope is a **static** analysis harness. Deliberate non-goals:
+
+- **Network traffic analysis** (interception, mitmproxy/Frida integration)
+  needs a running app and a device/emulator; it stays out of the core and
+  could only ever arrive as an external stage driven by another tool.
+- **Dynamic instrumentation or exploitation** — no hooking, no payload
+  generation.
+- **Repackaging/patching** — the tool is read-only with respect to the
+  artifact under test.
 
 ## Security & privacy
 
@@ -242,6 +267,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 | Exit code 4 | Cloud provider blocked or unavailable. Check `allow_cloud` and `llm health`. |
 | `jadx` runs out of memory | Set `JAVA_OPTS=-Xmx4g` or use `--stages apktool,inventory` first. |
 | semgrep rule pack fails to load | Validate with `semgrep --validate --config rules/mastg` (or `rules/mastg-ios`). |
+| `gitleaks` exits with code 1 | Not an error: gitleaks uses **1 for "leaks found"** (0 = clean, >= 2 = tool failure). mobiscope accepts 0 and 1 as success and only fails the stage on >= 2; `--exit-code` is not overridden. |
 | Ollama unreachable | `ollama serve` and check `OLLAMA_HOST` (default `http://localhost:11434`). |
 | Config not picked up | Run with `--config` explicitly; see the discovery order above. |
 | `SHA-256 mismatch` | The `--expect-sha256` gate fired; the artifact is not the one you intended. |
@@ -303,7 +329,8 @@ make test-ipa SAMPLE=path/to/app.ipa
 Expected output ends with `SMOKE PASSED (11/11 checks passed)`. To keep the
 generated fixtures for inspection: `KEEP=1 make smoke-apk`.
 
-Design decisions: `docs/adr/`. Remaining work: [PENDING.md](PENDING.md).
+Design decisions: [docs/adr/](docs/adr/). Artifact formats: [docs/artifacts.md](docs/artifacts.md).
+Analyzers: [docs/analyzers.md](docs/analyzers.md). Remaining work: [PENDING.md](PENDING.md).
 Changelog: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
