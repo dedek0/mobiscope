@@ -31,12 +31,19 @@ ARG GITLEAKS_VERSION=8.24.3
 ARG APKTOOL_VERSION=2.11.1
 ARG JADX_VERSION=1.5.1
 
+# iOS-capable tools:
+#   unzip          - ipa-extract fallback (in-process zip handles the default)
+#   libplist-utils - plistutil validation fallback (howett.net/plist is primary)
+#   llvm           - llvm-objdump / llvm-strings fallbacks for macho/strings
+# ipsw and ldid are static Go/C binaries fetched below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         python3 \
         python3-pip \
         unzip \
+        libplist-utils \
+        llvm \
     && rm -rf /var/lib/apt/lists/*
 
 # gitleaks — secret detection (static binary)
@@ -58,6 +65,13 @@ RUN curl -fsSL "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION
     && ln -sf /opt/jadx/bin/jadx /usr/local/bin/jadx \
     && rm /tmp/jadx.zip \
     && jadx --version
+
+# ipsw — Mach-O inspection and class-dump CLI (static, Linux amd64/arm64).
+ARG IPSW_VERSION=v0.0.0
+RUN if [ "$IPSW_VERSION" != "v0.0.0" ]; then \
+        curl -fsSL "https://github.com/blacktop/ipsw/releases/download/${IPSW_VERSION}/ipsw_${IPSW_VERSION#v}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin ipsw; \
+    fi
 
 # semgrep — pattern scanning (SARIF)
 RUN pip3 install --no-cache-dir "semgrep==1.127.1" \
