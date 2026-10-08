@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/analyzers"
+	"github.com/dedek0/mobiscope/internal/metrics"
 	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/dedek0/mobiscope/internal/report"
 	"github.com/dedek0/mobiscope/internal/utils"
@@ -40,6 +41,13 @@ type ToolMeta struct {
 type FindingCollector interface {
 	analyzers.Analyzer
 	Analyze(workdir string, sessionID string) []models.Finding
+}
+
+// FindingConverter is an Analyzer that can convert its own ToolResult.Output
+// into Findings. The pipeline asserts this interface at the call site instead
+// of growing a switch over analyzer names.
+type FindingConverter interface {
+	ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding
 }
 
 // Options controls pipeline execution.
@@ -212,9 +220,11 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	}
 
 	// Phase 3: inventory analyzer (no external binary).
+	var urlAgg analyzers.URLAggregate
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
-		invFindings := p.runInventory(sessionDir, session.ID)
+		invFindings, agg := p.runInventory(sessionDir, session.ID)
+		urlAgg = agg
 		session.Findings = append(session.Findings, invFindings...)
 		invDur := time.Since(invStart)
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
@@ -250,6 +260,8 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	// Phase 3b: inventory.json with structured app facts.
 	session.App = p.collectAppInventory(sessionDir)
+	session.App.URLCount = urlAgg.Count
+	session.App.URLs = urlAgg.URLs
 	if session.App.BundleID != "" {
 		session.PackageName = session.App.BundleID
 		session.VersionName = session.App.VersionName
@@ -261,6 +273,8 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	if err := writeJSONFile(filepath.Join(sessionDir, "inventory.json"), session.App); err != nil {
 		p.logger.Error("failed to persist inventory.json", "error", err)
 	}
+
+	p.recordMetrics(session, meta)
 
 	// Phase 7: persist artifacts.
 	now := time.Now()
@@ -286,6 +300,18 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		return session, fmt.Errorf("pipeline aborted (fail-fast): %w", firstErr)
 	}
 	return session, nil
+}
+
+// recordMetrics feeds the process-wide metrics registry so /metrics can
+// expose analyzer durations, failure counts and findings by label.
+func (p *Pipeline) recordMetrics(session *models.AnalysisSession, meta Meta) {
+	metrics.RecordAnalysis()
+	for _, t := range meta.Tools {
+		metrics.RecordAnalyzer(t.Name, t.Duration, t.Error != "")
+	}
+	for _, f := range session.Findings {
+		metrics.RecordFindings(string(f.Severity), string(f.Category))
+	}
 }
 
 // dryRun reports what would run without executing anything.
@@ -374,38 +400,24 @@ func (p *Pipeline) collectSigning(apkPath string) (string, string) {
 	return analyzers.SigningIdentity(apkPath)
 }
 
-// runInventory dispatches to the platform-appropriate inventory analyzer.
-func (p *Pipeline) runInventory(sessionDir, sessionID string) []models.Finding {
+// runInventory dispatches to the platform-appropriate inventory analyzer and
+// returns its findings plus the Android URL aggregate (zero on iOS).
+func (p *Pipeline) runInventory(sessionDir, sessionID string) ([]models.Finding, analyzers.URLAggregate) {
 	if p.opts.Platform == models.PlatformIOS {
-		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID)
+		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID), analyzers.URLAggregate{}
 	}
-	return analyzers.NewInventory().Analyze(sessionDir, sessionID)
+	inv := analyzers.NewInventory()
+	findings := inv.Analyze(sessionDir, sessionID)
+	return findings, inv.URLAggregate()
 }
 
 func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResult, sessionID string) []models.Finding {
 	if result.Output == nil {
 		return nil
 	}
-
-	switch a.Name() {
-	case "gitleaks":
-		return analyzers.ConvertGitleaksFindings(result.Output, sessionID)
-	case "semgrep":
-		return analyzers.ConvertSemgrepFindings(result.Output, sessionID)
-	case "ipa-extract":
-		return analyzers.ConvertIPAExtractFindings(result.Output, sessionID)
-	case "plist":
-		return analyzers.ConvertPlistFindings(result.Output, sessionID)
-	case "macho":
-		return analyzers.ConvertMachOFindings(result.Output, sessionID)
-	case "codesign":
-		return analyzers.ConvertCodeSignFindings(result.Output, sessionID)
-	case "strings":
-		return analyzers.ConvertStringsFindings(result.Output, sessionID)
-	case "classdump":
-		return analyzers.ConvertClassDumpFindings(result.Output, sessionID)
+	if c, ok := a.(FindingConverter); ok {
+		return c.ConvertFindings(result.Output, sessionID)
 	}
-
 	return nil
 }
 

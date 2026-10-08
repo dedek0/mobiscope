@@ -3,7 +3,10 @@
 package pipeline
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,8 +15,11 @@ import (
 
 	"github.com/dedek0/mobiscope/internal/analyzers"
 	"github.com/dedek0/mobiscope/internal/models"
+	"github.com/dedek0/mobiscope/internal/platform"
+	"github.com/dedek0/mobiscope/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"howett.net/plist"
 )
 
 // TestE2E_SyntheticAPKWithSecrets tests the full pipeline with a synthetic
@@ -293,4 +299,180 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// outputAnalyzer is a mock analyzer that returns fixed JSON output; used to
+// simulate external iOS tools without a toolchain.
+type outputAnalyzer struct {
+	name   string
+	output json.RawMessage
+}
+
+func (o *outputAnalyzer) Name() string     { return o.name }
+func (o *outputAnalyzer) Available() error { return nil }
+
+// ConvertFindings implements pipeline.FindingConverter so the double behaves
+// like the real analyzer it impersonates (the pipeline asserts the interface,
+// not the name).
+func (o *outputAnalyzer) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
+	if o.name == "strings" {
+		return analyzers.ConvertStringsFindings(raw, sessionID)
+	}
+	return nil
+}
+
+func (o *outputAnalyzer) Run(_ context.Context, _ string, _ string) (models.ToolResult, error) {
+	return models.ToolResult{
+		ToolName:  o.name,
+		Version:   "mock",
+		StartedAt: time.Now(),
+		Duration:  time.Millisecond,
+		Output:    o.output,
+	}, nil
+}
+
+// buildSyntheticIPA writes a tiny but structurally complete IPA: a Payload
+// bundle with an Info.plist carrying NSAppTransportSecurity plus a privacy
+// key, and entitlements with a debug + wildcard keychain group. Entry order
+// is fixed so the archive bytes (and therefore the session ID) are stable.
+func buildSyntheticIPA(t *testing.T, dir string) string {
+	t.Helper()
+
+	infoPlist, err := plist.Marshal(map[string]interface{}{
+		"CFBundleIdentifier":         "com.example.smoke",
+		"CFBundleShortVersionString": "1.0",
+		"CFBundleVersion":            "1",
+		"CFBundleExecutable":         "SmokeApp",
+		"MinimumOSVersion":           "15.0",
+		"NSCameraUsageDescription":   "used by the smoke test",
+		"NSAppTransportSecurity": map[string]interface{}{
+			"NSAllowsArbitraryLoads": true,
+		},
+	}, plist.XMLFormat)
+	require.NoError(t, err)
+
+	entPlist, err := plist.Marshal(map[string]interface{}{
+		"get-task-allow":         true,
+		"keychain-access-groups": []interface{}{"ABC123.com.example.smoke", "*"},
+	}, plist.XMLFormat)
+	require.NoError(t, err)
+
+	entries := []struct {
+		name string
+		data []byte
+	}{
+		{"Payload/SmokeApp.app/Info.plist", infoPlist},
+		{"Payload/SmokeApp.app/entitlements.plist", entPlist},
+		{"Payload/SmokeApp.app/SmokeApp", []byte("not a real binary")},
+		{"Payload/SmokeApp.app/APIClient.swift", []byte("class APIClient {}")},
+	}
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, e := range entries {
+		w, err := zw.Create(e.name)
+		require.NoError(t, err)
+		_, err = w.Write(e.data)
+		require.NoError(t, err)
+	}
+	require.NoError(t, zw.Close())
+
+	path := filepath.Join(dir, "smoke.ipa")
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o600))
+	return path
+}
+
+// TestE2E_SyntheticIPA runs the full pipeline against a hand-made IPA with
+// in-process iOS analyzers plus a mocked strings tool (mirroring the
+// synthetic-APK test above). It asserts platform wiring, ATS/entitlement
+// findings, artifact persistence and a findings.json round-trip.
+func TestE2E_SyntheticIPA(t *testing.T) {
+	tmpDir := t.TempDir()
+	ipaPath := buildSyntheticIPA(t, tmpDir)
+
+	// The archive must be detected as iOS before any tool runs.
+	target, err := platform.Detect(ipaPath)
+	require.NoError(t, err)
+	assert.Equal(t, models.PlatformIOS, target.Platform)
+	assert.Equal(t, platform.FormatIPA, target.Format)
+
+	stringsMock := &outputAnalyzer{
+		name:   "strings",
+		output: json.RawMessage(`{"strings":["SmokeApp|AKIAIOSFODNN7EXAMPLE planted secret"]}`),
+	}
+	list := []analyzers.Analyzer{
+		analyzers.NewIPAExtract(),
+		analyzers.NewPlistAnalyzer(),
+		analyzers.NewCodeSign(),
+		stringsMock,
+	}
+
+	workdir := filepath.Join(tmpDir, "targets")
+	p := NewWithOptions(list, slog.Default(), Options{Platform: models.PlatformIOS})
+	session, err := p.Run(context.Background(), ipaPath, workdir, nil)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusCompleted, session.Status)
+	assert.Equal(t, models.PlatformIOS, session.Platform, "session must record the iOS platform")
+
+	// Hash recorded by the pipeline must match an independent computation.
+	hash, err := utils.Sha256File(ipaPath)
+	require.NoError(t, err)
+	assert.Equal(t, hash, session.APKHash)
+
+	// Inventory facts came from the extracted Info.plist.
+	assert.Equal(t, "com.example.smoke", session.App.BundleID)
+	assert.Equal(t, "1.0", session.App.VersionName)
+
+	// ATS finding from the plist analyzer.
+	var atsFindings, entitlementFindings, secretFindings int
+	for _, f := range session.Findings {
+		assert.Equal(t, "ios", string(f.Platform), "every finding must carry platform=ios")
+		switch f.Category {
+		case models.CategoryNetworkConfig:
+			atsFindings++
+			assert.Contains(t, f.Title, "arbitrary loads")
+			assert.Equal(t, models.SeverityHigh, f.Severity)
+		case models.CategoryEntitlement:
+			entitlementFindings++
+		case models.CategorySecret:
+			secretFindings++
+		}
+	}
+	assert.Equal(t, 1, atsFindings, "exactly one ATS finding (deduped across plist + inventory-ios)")
+	assert.GreaterOrEqual(t, entitlementFindings, 2, "get-task-allow and wildcard keychain group expected")
+	assert.Equal(t, 1, secretFindings, "mock strings analyzer output must yield one secret finding")
+
+	// Artifacts are persisted under workdir/<session id>.
+	sessionDir := filepath.Join(workdir, session.ID)
+	for _, name := range []string{
+		"meta.json", "findings.json", "report.md", "session.json",
+		"report.sarif", "inventory.json",
+	} {
+		assert.FileExists(t, filepath.Join(sessionDir, name), "%s must exist", name)
+	}
+
+	// meta.json records the platform too.
+	var meta Meta
+	metaRaw, err := os.ReadFile(filepath.Join(sessionDir, "meta.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(metaRaw, &meta))
+	assert.Equal(t, models.PlatformIOS, meta.Platform)
+
+	// findings.json round-trips: same count, same IDs, enums parse back.
+	findingsRaw, err := os.ReadFile(filepath.Join(sessionDir, "findings.json"))
+	require.NoError(t, err)
+	var roundTrip []models.Finding
+	require.NoError(t, json.Unmarshal(findingsRaw, &roundTrip))
+	require.Len(t, roundTrip, len(session.Findings))
+
+	origIDs := make(map[string]bool, len(session.Findings))
+	for _, f := range session.Findings {
+		origIDs[f.ID] = true
+	}
+	for _, f := range roundTrip {
+		assert.True(t, origIDs[f.ID], "round-tripped finding %s must exist in the session", f.ID)
+		assert.NotEmpty(t, string(f.Category))
+		assert.NotEmpty(t, string(f.Severity))
+		assert.Equal(t, "ios", string(f.Platform))
+	}
 }
