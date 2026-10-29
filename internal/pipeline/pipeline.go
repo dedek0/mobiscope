@@ -60,6 +60,28 @@ type Options struct {
 	DryRun bool
 	// Platform is the detected target platform (android/ios).
 	Platform models.Platform
+	// Strict makes a run with failed tools return an error even when
+	// FailFast is off.
+	Strict bool
+	// OnStage is called when a stage starts and when it finishes. It is used
+	// by the CLI to render live progress.
+	OnStage func(stage StageEvent)
+}
+
+// StageEvent describes the lifecycle of a single pipeline stage.
+type StageEvent struct {
+	// Name is the analyzer name.
+	Name string
+	// Phase is "decompiler" or "scanner".
+	Phase string
+	// State is "start", "done" or "error".
+	State string
+	// Duration is set when State is "done" or "error".
+	Duration time.Duration
+	// Err is set when State is "error".
+	Err error
+	// Findings is the number of findings the stage produced.
+	Findings int
 }
 
 // Pipeline orchestrates a sequence of Analyzer stages.
@@ -88,10 +110,18 @@ func NewWithOptions(analyzers []analyzers.Analyzer, logger *slog.Logger, opts Op
 
 // analyzerRun records one analyzer's outcome for thread-safe collection.
 type analyzerRun struct {
+	analyzer analyzers.Analyzer
 	tool     models.ToolResult
 	meta     ToolMeta
 	findings []models.Finding
 	err      error
+}
+
+// stageSlot pairs an analyzer with the index it owns in the results slice, so
+// two analyzers that happen to share a name never overwrite each other.
+type stageSlot struct {
+	analyzer analyzers.Analyzer
+	slot     int
 }
 
 // Run executes the configured analyzers against the APK.
@@ -138,42 +168,54 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	filtered := p.filterAnalyzers(stages)
 
-	// Phase 1: extractors/decompilers (independent of each other).
-	decompilers := selectByName(filtered, "apktool", "jadx", "ipa-extract")
-	// Phase 2: scanners (read extractor output).
-	scanners := selectByName(filtered, "gitleaks", "semgrep", "plist", "macho", "codesign", "strings", "classdump")
-
-	runs := make([]analyzerRun, len(filtered))
-	idx := make(map[string]int, len(filtered))
+	// Phase split is by role, not by a hardcoded name list: an analyzer that
+	// does not declare a phase is treated as a scanner, so a new stage is
+	// never silently dropped from the run.
+	var decompilers, scanners []stageSlot
 	for i, a := range filtered {
-		idx[a.Name()] = i
+		slot := stageSlot{analyzer: a, slot: i}
+		if analyzers.PhaseOf(a) == analyzers.PhaseScanner {
+			scanners = append(scanners, slot)
+			continue
+		}
+		decompilers = append(decompilers, slot)
 	}
 
-	runGroup := func(group []analyzers.Analyzer) {
+	runs := make([]analyzerRun, len(filtered))
+
+	// runGroup executes one phase. It returns the first error observed in
+	// registration order; with FailFast the shared context is cancelled so
+	// the remaining tools stop instead of running to completion.
+	runGroup := func(group []stageSlot) error {
 		var mu sync.Mutex
-		g := errgroup.Group{}
+		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(p.opts.MaxConcurrency)
 
-		for _, a := range group {
-			a := a
+		for _, s := range group {
+			s := s
 			g.Go(func() error {
-				if err := ctx.Err(); err != nil {
+				if err := gctx.Err(); err != nil {
 					return err
 				}
 
-				p.logger.Info("running analyzer", "tool", a.Name())
-				toolResult, err := a.Run(ctx, apkPath, sessionDir)
+				name := s.analyzer.Name()
+				p.emitStage(StageEvent{Name: name, Phase: phaseLabel(s.analyzer), State: "start"})
+				p.logger.Info("running analyzer", "tool", name)
 
-				findings := []models.Finding{}
-				if err == nil {
-					findings = p.convertFindings(a, toolResult, session.ID)
-				} else {
-					p.logger.Error("analyzer failed", "tool", a.Name(), "error", err)
+				toolResult, err := runAnalyzer(gctx, s.analyzer, apkPath, sessionDir)
+
+				// Convert findings even when the tool failed: a tool that
+				// wrote a usable report before exiting non-zero still
+				// produced evidence.
+				findings := p.convertFindings(s.analyzer, toolResult, session.ID)
+				if err != nil {
+					p.logger.Error("analyzer failed", "tool", name, "error", err)
 				}
 
 				mu.Lock()
-				runs[idx[a.Name()]] = analyzerRun{
-					tool: toolResult,
+				runs[s.slot] = analyzerRun{
+					analyzer: s.analyzer,
+					tool:     toolResult,
 					meta: ToolMeta{
 						Name:      toolResult.ToolName,
 						Version:   toolResult.Version,
@@ -187,18 +229,28 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 				}
 				mu.Unlock()
 
+				state := "done"
+				if err != nil {
+					state = "error"
+				}
+				p.emitStage(StageEvent{
+					Name: name, Phase: phaseLabel(s.analyzer), State: state,
+					Duration: toolResult.Duration, Err: err, Findings: len(findings),
+				})
+
 				if err != nil && p.opts.FailFast {
 					return err
 				}
 				return nil
 			})
 		}
-		_ = g.Wait()
+		return g.Wait()
 	}
 
-	runGroup(decompilers)
+	decompilersErr := runGroup(decompilers)
+	var scannersErr error
 	if ctx.Err() == nil {
-		runGroup(scanners)
+		scannersErr = runGroup(scanners)
 	}
 
 	// Collect in registration order for deterministic output.
@@ -209,10 +261,34 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		}
 		session.ToolResults = append(session.ToolResults, r.tool)
 		meta.Tools = append(meta.Tools, r.meta)
-		session.Findings = append(session.Findings, r.findings...)
-		if r.err != nil && firstErr == nil {
-			firstErr = r.err
+
+		findings := r.findings
+		if r.analyzer != nil && r.meta.Name == analyzers.NameRepack {
+			// The repackaging summary gained the certificate fingerprint
+			// after the stage ran, so its findings are recomputed.
+			findings = p.convertFindings(r.analyzer, r.tool, session.ID)
 		}
+		session.Findings = append(session.Findings, findings...)
+
+		if r.err != nil {
+			session.FailedTools = append(session.FailedTools, r.meta.Name)
+			if firstErr == nil {
+				firstErr = r.err
+			}
+		}
+	}
+	if decompilersErr != nil && firstErr == nil {
+		firstErr = decompilersErr
+	}
+	if scannersErr != nil && firstErr == nil {
+		firstErr = scannersErr
+	}
+
+	// The repackaging stage needs the certificate the apksigner stage
+	// found, so the comparison against the expected fingerprint happens
+	// once both stages have run.
+	if plat != models.PlatformIOS {
+		p.attachSigningIdentity(&runs)
 	}
 
 	if ctx.Err() != nil {
@@ -223,14 +299,14 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	var urlAgg analyzers.URLAggregate
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
-		invFindings, agg := p.runInventory(sessionDir, session.ID)
+		invFindings, agg := p.runInventory(plat, sessionDir, session.ID)
 		urlAgg = agg
 		session.Findings = append(session.Findings, invFindings...)
 		invDur := time.Since(invStart)
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
 
 		invName := analyzers.NameInventory
-		if p.opts.Platform == models.PlatformIOS {
+		if plat == models.PlatformIOS {
 			invName = "inventory-ios"
 		}
 		invResult := models.ToolResult{
@@ -259,14 +335,14 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	report.SortFindingsBySeverity(session.Findings)
 
 	// Phase 3b: inventory.json with structured app facts.
-	session.App = p.collectAppInventory(sessionDir)
+	session.App = p.collectAppInventory(plat, sessionDir, runs)
 	session.App.URLCount = urlAgg.Count
 	session.App.URLs = urlAgg.URLs
 	if session.App.BundleID != "" {
 		session.PackageName = session.App.BundleID
 		session.VersionName = session.App.VersionName
 	}
-	if fp, scheme := p.collectSigning(apkPath); fp != "" || scheme != "" {
+	if fp, scheme := p.collectSigning(plat, apkPath, runs); fp != "" || scheme != "" {
 		session.SigningCertFP = fp
 		session.SignatureScheme = scheme
 	}
@@ -280,9 +356,14 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	now := time.Now()
 	session.CompletedAt = &now
 	if session.Status == models.StatusRunning {
-		if firstErr != nil && p.opts.FailFast {
+		switch {
+		case firstErr != nil && p.opts.FailFast:
 			session.Status = models.StatusFailed
-		} else {
+		case len(session.FailedTools) > 0:
+			// The run finished but at least one tool failed: the report is
+			// usable but incomplete, and the status says so.
+			session.Status = models.StatusPartial
+		default:
 			session.Status = models.StatusCompleted
 		}
 	}
@@ -296,10 +377,100 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		p.logger.Error("failed to persist session artifacts", "error", err)
 	}
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return session, fmt.Errorf("pipeline cancelled: %w", ctxErr)
+	}
 	if firstErr != nil && p.opts.FailFast {
 		return session, fmt.Errorf("pipeline aborted (fail-fast): %w", firstErr)
 	}
+	if firstErr != nil && p.opts.Strict {
+		return session, fmt.Errorf("pipeline completed with failed tools: %w", firstErr)
+	}
 	return session, nil
+}
+
+// runAnalyzer executes one analyzer, converting a panic into an error so a
+// hostile artifact that trips a parser bug cannot take down the process.
+func runAnalyzer(ctx context.Context, a analyzers.Analyzer, target, workdir string) (result models.ToolResult, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("analyzer %s panicked: %v", a.Name(), rec)
+			result.ToolName = a.Name()
+			result.Error = err.Error()
+			result.ExitCode = -1
+		}
+	}()
+	return a.Run(ctx, target, workdir)
+}
+
+// phaseLabel returns a human-readable phase name for an analyzer.
+func phaseLabel(a analyzers.Analyzer) string {
+	switch analyzers.PhaseOf(a) {
+	case analyzers.PhaseDecompiler:
+		return "decompiler"
+	case analyzers.PhaseIndependent:
+		return "independent"
+	default:
+		return "scanner"
+	}
+}
+
+// emitStage notifies the progress listener, if one is configured.
+func (p *Pipeline) emitStage(ev StageEvent) {
+	if p.opts.OnStage != nil {
+		p.opts.OnStage(ev)
+	}
+}
+
+// attachSigningIdentity copies the certificate fingerprint found by the
+// apksigner stage into the repackaging stage output, so the comparison
+// against the expected fingerprint can happen.
+func (p *Pipeline) attachSigningIdentity(runs *[]analyzerRun) {
+	actual := ""
+	for _, r := range *runs {
+		if r.meta.Name != "apksigner" || len(r.tool.Output) == 0 {
+			continue
+		}
+		var out struct {
+			CertFP string `json:"signing_cert_fp"`
+		}
+		if err := json.Unmarshal(r.tool.Output, &out); err == nil {
+			actual = out.CertFP
+		}
+	}
+	if actual == "" {
+		return
+	}
+
+	for i := range *runs {
+		if (*runs)[i].meta.Name != "repack" || len((*runs)[i].tool.Output) == 0 {
+			continue
+		}
+		var summary map[string]interface{}
+		if err := json.Unmarshal((*runs)[i].tool.Output, &summary); err != nil {
+			continue
+		}
+		summary["actual_cert"] = actual
+		summary["cert_matches"] = false
+		if expected, ok := summary["expected_cert"].(string); ok && expected != "" {
+			summary["cert_matches"] = certFingerprintsEqual(expected, actual)
+		}
+		if raw, err := json.Marshal(summary); err == nil {
+			(*runs)[i].tool.Output = raw
+		}
+	}
+}
+
+// certFingerprintsEqual compares two certificate fingerprints, ignoring case
+// and the separators people paste them with.
+func certFingerprintsEqual(a, b string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(strings.TrimSpace(s))
+		s = strings.ReplaceAll(s, ":", "")
+		s = strings.ReplaceAll(s, " ", "")
+		return s
+	}
+	return norm(a) != "" && norm(a) == norm(b)
 }
 
 // recordMetrics feeds the process-wide metrics registry so /metrics can
@@ -385,25 +556,46 @@ func persistSarif(path string, session *models.AnalysisSession) error {
 }
 
 // collectAppInventory gathers structured app facts for inventory.json.
-func (p *Pipeline) collectAppInventory(sessionDir string) models.AppInventory {
-	if p.opts.Platform == models.PlatformIOS {
+func (p *Pipeline) collectAppInventory(plat models.Platform, sessionDir string, runs []analyzerRun) models.AppInventory {
+	if plat == models.PlatformIOS {
 		return analyzers.IOSAppInfo(sessionDir)
 	}
-	return analyzers.AndroidManifestInfo(sessionDir)
+	inv := analyzers.AndroidManifestInfo(sessionDir)
+	var toolResults []models.ToolResult
+	for _, r := range runs {
+		toolResults = append(toolResults, r.tool)
+	}
+	inv.NativeLibs = analyzers.NativeLibsFromRuns(toolResults)
+	inv.SDKs = analyzers.SDKsFromRuns(toolResults)
+	return inv
 }
 
-// collectSigning records the APK signing identity when apksigner ran.
-func (p *Pipeline) collectSigning(apkPath string) (string, string) {
-	if p.opts.Platform == models.PlatformIOS {
+// collectSigning records the APK signing identity. It reuses the apksigner
+// stage output when the stage ran, and only falls back to the standalone
+// probe when it did not (for example under an explicit --stages filter).
+func (p *Pipeline) collectSigning(plat models.Platform, apkPath string, runs []analyzerRun) (string, string) {
+	if plat == models.PlatformIOS {
 		return "", ""
+	}
+	for _, r := range runs {
+		if r.meta.Name != "apksigner" || len(r.tool.Output) == 0 {
+			continue
+		}
+		var out struct {
+			Scheme string `json:"signature_scheme"`
+			CertFP string `json:"signing_cert_fp"`
+		}
+		if err := json.Unmarshal(r.tool.Output, &out); err == nil {
+			return out.CertFP, out.Scheme
+		}
 	}
 	return analyzers.SigningIdentity(apkPath)
 }
 
 // runInventory dispatches to the platform-appropriate inventory analyzer and
 // returns its findings plus the Android URL aggregate (zero on iOS).
-func (p *Pipeline) runInventory(sessionDir, sessionID string) ([]models.Finding, analyzers.URLAggregate) {
-	if p.opts.Platform == models.PlatformIOS {
+func (p *Pipeline) runInventory(plat models.Platform, sessionDir, sessionID string) ([]models.Finding, analyzers.URLAggregate) {
+	if plat == models.PlatformIOS {
 		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID), analyzers.URLAggregate{}
 	}
 	inv := analyzers.NewInventory()
@@ -450,21 +642,6 @@ func (p *Pipeline) filterAnalyzers(stages []string) []analyzers.Analyzer {
 		}
 	}
 	return filtered
-}
-
-// selectByName returns the subset of analyzers whose Name() is in names.
-func selectByName(list []analyzers.Analyzer, names ...string) []analyzers.Analyzer {
-	want := make(map[string]bool, len(names))
-	for _, n := range names {
-		want[n] = true
-	}
-	var out []analyzers.Analyzer
-	for _, a := range list {
-		if want[a.Name()] {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 func persistMeta(path string, meta *Meta) error {

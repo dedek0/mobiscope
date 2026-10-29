@@ -29,9 +29,13 @@ func Dedup(findings []models.Finding) []models.Finding {
 	return result
 }
 
+// dedupKey identifies an exact duplicate finding. The title is part of the
+// key: two findings at the same location with the same snippet but a
+// different title are different findings, and dropping one of them would
+// silently lose evidence.
 func dedupKey(f models.Finding) string {
 	snippetHash := sha256.Sum256([]byte(f.Location.Snippet))
-	return fmt.Sprintf("%s|%s|%d|%s", f.Category, f.Location.File, f.Location.Line, hex.EncodeToString(snippetHash[:8]))
+	return fmt.Sprintf("%s|%s|%s|%d|%s", f.Category, f.Title, f.Location.File, f.Location.Line, hex.EncodeToString(snippetHash[:8]))
 }
 
 // Cluster groups findings by (SourceTool, Category, Title) and marks representatives.

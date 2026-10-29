@@ -108,11 +108,70 @@ func TestPipeline_Run_ToolFailureContinues(t *testing.T) {
 	session, err := p.Run(context.Background(), apkPath, workdir, nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, models.StatusCompleted, session.Status)
+	// A tool failure yields a partial session: the report is usable but
+	// incomplete and says so.
+	assert.Equal(t, models.StatusPartial, session.Status)
+	assert.Equal(t, []string{"apktool"}, session.FailedTools)
 	// 2 external tools + inventory
 	assert.Len(t, session.ToolResults, 3)
 	assert.NotEmpty(t, session.ToolResults[0].Error)
 	assert.Empty(t, session.ToolResults[1].Error)
+}
+
+func TestPipeline_Run_StrictFailsOnToolError(t *testing.T) {
+	logger := slog.Default()
+	apkPath := createTestAPK(t)
+	workdir := t.TempDir()
+
+	tool1 := newMockAnalyzer("apktool", fmt.Errorf("apktool crashed"))
+
+	p := NewWithOptions([]analyzers.Analyzer{tool1}, logger, Options{Strict: true})
+	session, err := p.Run(context.Background(), apkPath, workdir, nil)
+
+	require.Error(t, err)
+	assert.Equal(t, models.StatusPartial, session.Status)
+	assert.Equal(t, []string{"apktool"}, session.FailedTools)
+}
+
+func TestPipeline_Run_DuplicateAnalyzerNamesBothRun(t *testing.T) {
+	logger := slog.Default()
+	apkPath := createTestAPK(t)
+	workdir := t.TempDir()
+
+	// Two analyzers sharing a name must not overwrite each other.
+	tool1 := newMockAnalyzer("jadx", nil)
+	tool2 := newMockAnalyzer("jadx", nil)
+
+	p := New([]analyzers.Analyzer{tool1, tool2}, logger)
+	session, err := p.Run(context.Background(), apkPath, workdir, []string{"jadx"})
+
+	require.NoError(t, err)
+	assert.True(t, tool1.called)
+	assert.True(t, tool2.called)
+	assert.Len(t, session.ToolResults, 2)
+}
+
+func TestPipeline_Run_AnalyzerPanicBecomesError(t *testing.T) {
+	logger := slog.Default()
+	apkPath := createTestAPK(t)
+	workdir := t.TempDir()
+
+	p := New([]analyzers.Analyzer{&panickingAnalyzer{}}, logger)
+	session, err := p.Run(context.Background(), apkPath, workdir, []string{"boom"})
+
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusPartial, session.Status)
+	require.Len(t, session.FailedTools, 1)
+	assert.Equal(t, "boom", session.FailedTools[0])
+}
+
+// panickingAnalyzer simulates a parser bug triggered by hostile input.
+type panickingAnalyzer struct{}
+
+func (p *panickingAnalyzer) Name() string     { return "boom" }
+func (p *panickingAnalyzer) Available() error { return nil }
+func (p *panickingAnalyzer) Run(_ context.Context, _ string, _ string) (models.ToolResult, error) {
+	panic("index out of range")
 }
 
 func TestPipeline_Run_MetaJSONPersisted(t *testing.T) {
@@ -182,7 +241,9 @@ func TestPipeline_Run_CancelledContext(t *testing.T) {
 	p := New([]analyzers.Analyzer{tool1, tool2}, logger)
 	session, err := p.Run(ctx, apkPath, workdir, nil)
 
-	require.NoError(t, err)
+	// A cancelled run is not a successful run: the caller must see the error.
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, models.StatusFailed, session.Status)
 	// Context cancelled before any analyzer runs
 	assert.Len(t, session.ToolResults, 0)
