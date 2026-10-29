@@ -52,6 +52,10 @@ func newAnalyzeCmd() *cobra.Command {
 		Long:  "Orchestrates decompilation and analysis tools against one or more target APK/IPA files. Each target gets its own session directory under --workdir.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			// The embedded semgrep packs are extracted to a temp directory
+			// on first use; remove it when the command finishes.
+			defer rules.Cleanup()
+
 			level := slog.LevelInfo
 			if verbose {
 				level = slog.LevelDebug
@@ -149,7 +153,7 @@ func newAnalyzeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&workdir, "workdir", "targets", "Output base directory")
-	cmd.Flags().StringVar(&stages, "stages", "", "Comma-separated stages (apktool,jadx,gitleaks,semgrep,inventory)")
+	cmd.Flags().StringVar(&stages, "stages", "", "Comma-separated stages (Android: apktool,jadx,elf,anti-analysis,repack,sdk,gitleaks,semgrep,inventory; iOS: ipa-extract,plist,macho,codesign,classdump,strings)")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Enable debug logging")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Only log errors")
 	cmd.Flags().BoolVar(&noRes, "no-res", false, "Skip resource decoding")

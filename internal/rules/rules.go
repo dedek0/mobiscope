@@ -77,12 +77,16 @@ func Materialize(p Pack) (string, error) {
 	}
 }
 
-// Cleanup removes the temporary directory holding the materialized packs.
+// Cleanup removes the temporary directory holding the materialized packs and
+// resets the one-shot state, so a later call to Materialize creates a fresh
+// directory instead of returning a path that no longer exists.
 func Cleanup() {
 	if materializeDir != "" {
 		_ = os.RemoveAll(materializeDir)
 		materializeDir = ""
 	}
+	materializeErr = nil
+	materializeOnce = sync.Once{}
 }
 
 // AndroidYAML returns the embedded Android pack bytes.
