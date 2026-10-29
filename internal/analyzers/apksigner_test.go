@@ -43,7 +43,8 @@ func TestParseApksignerOutput_V1Only(t *testing.T) {
 	scheme, certFP, signerCount, debug := parseApksignerOutput(out)
 	assert.Equal(t, "v1", scheme)
 	assert.Empty(t, certFP)
-	assert.Equal(t, "0", signerCount)
+	// No signer block in the output: the count is unknown, not zero.
+	assert.Equal(t, "unknown", signerCount)
 	assert.Empty(t, debug)
 }
 
@@ -52,7 +53,9 @@ func TestParseApksignerOutput_Malformed(t *testing.T) {
 		scheme, certFP, signerCount, debug := parseApksignerOutput(out)
 		assert.Empty(t, scheme, "input: %q", out)
 		assert.Empty(t, certFP, "input: %q", out)
-		assert.Equal(t, "0", signerCount, "input: %q", out)
+		// Unparsable output means "unknown", not "0": reporting zero would
+		// claim the APK has no signer.
+		assert.Equal(t, "unknown", signerCount, "input: %q", out)
 		assert.Empty(t, debug, "input: %q", out)
 	}
 }

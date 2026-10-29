@@ -64,8 +64,10 @@ func (g *Gitleaks) Run(ctx context.Context, target string, workdir string) (mode
 		result.ExitCode = cmdResult.ExitCode
 	}
 	// Prefer the report file: stdout carries banners and logs as well as JSON.
-	if data, readErr := os.ReadFile(reportPath); readErr == nil { //nolint:gosec
+	if data, readErr := readFileCapped(reportPath, maxToolReportBytes); readErr == nil {
 		result.Output = extractJSONArray(string(data))
+		// The raw gitleaks report contains every secret in full.
+		_ = os.Chmod(reportPath, 0o600)
 	} else if cmdResult != nil {
 		result.Output = extractJSONArray(cmdResult.Stdout)
 	}

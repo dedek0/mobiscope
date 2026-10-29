@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -74,7 +74,13 @@ func (c *CodeSign) Run(_ context.Context, target string, workdir string) (models
 		// the main executable for an <plist>…</plist> block.
 		infoMap, _ := readPlist(filepath.Join(bundle, "Info.plist"))
 		if exe := strOr(infoMap["CFBundleExecutable"]); exe != "" {
-			if data, err := os.ReadFile(filepath.Join(bundle, exe)); err == nil { //nolint:gosec
+			// CFBundleExecutable comes from an untrusted plist: it must be
+			// a plain file name that stays inside the bundle.
+			exePath, joinErr := safeJoinPath(bundle, exe)
+			if joinErr != nil {
+				slog.Debug("codesign: refusing executable path from Info.plist",
+					"bundle", bundle, "error", joinErr)
+			} else if data, err := readFileCapped(exePath, maxManifestBytes); err == nil {
 				if m := extractPlistFromBytes(data); len(m) > 0 {
 					entitlements = m
 				}
@@ -84,7 +90,7 @@ func (c *CodeSign) Run(_ context.Context, target string, workdir string) (models
 
 	profile := map[string]interface{}{}
 	profPath := filepath.Join(bundle, "embedded.mobileprovision")
-	if data, err := os.ReadFile(profPath); err == nil { //nolint:gosec
+	if data, err := readFileCapped(profPath, maxManifestBytes); err == nil {
 		// The CMS wrapper is binary; the inner plist is still greppable.
 		if m := extractPlistFromBytes(data); len(m) > 0 {
 			profile = m

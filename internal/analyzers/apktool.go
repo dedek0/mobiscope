@@ -39,6 +39,10 @@ func NewAPKToolWithRunner(cfg APKToolConfig, runner CommandRunner) *APKTool {
 
 func (a *APKTool) Name() string { return apktoolBinary }
 
+// Phase marks the analyzer as a decompiler: it produces the tree the
+// scanner stages read.
+func (a *APKTool) Phase() Phase { return PhaseDecompiler }
+
 func (a *APKTool) Available() error {
 	return CheckBinary(apktoolBinary)
 }

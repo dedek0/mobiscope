@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -194,7 +193,7 @@ func decodePlistMapAny(data []byte) (map[string]interface{}, error) {
 }
 
 func readPlist(path string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(path) //nolint:gosec
+	data, err := readFileCapped(path, maxManifestBytes)
 	if err != nil {
 		return nil, err
 	}

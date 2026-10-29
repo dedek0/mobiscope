@@ -37,6 +37,10 @@ func NewIPAExtractWithRunner(runner CommandRunner) *IPAExtract {
 
 func (e *IPAExtract) Name() string { return ipaName }
 
+// Phase marks the analyzer as a decompiler: it produces the extracted
+// bundle the scanner stages read.
+func (e *IPAExtract) Phase() Phase { return PhaseDecompiler }
+
 // Available is always satisfied: extraction is done in-process via archive/zip
 // so no external binary is required.
 func (e *IPAExtract) Available() error { return nil }

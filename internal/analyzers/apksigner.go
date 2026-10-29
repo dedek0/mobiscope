@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,12 +37,19 @@ func NewApkSignerWithRunner(runner CommandRunner) *ApkSigner {
 
 func (a *ApkSigner) Name() string { return apksignerName }
 
+// Available reports whether the apksigner binary is present. The analyzer
+// still runs without it (the META-INF heuristic takes over), but the dry-run
+// output must say that the strong check is unavailable.
 func (a *ApkSigner) Available() error {
-	if err := CheckBinary(apksignerBinary); err == nil {
-		return nil
+	if err := CheckBinary(apksignerBinary); err != nil {
+		return fmt.Errorf("%w (the META-INF fallback will be used)", err)
 	}
 	return nil
 }
+
+// Phase marks the analyzer as independent: it verifies the target artifact
+// itself and does not read decompiler output.
+func (a *ApkSigner) Phase() Phase { return PhaseIndependent }
 
 func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (models.ToolResult, error) {
 	start := time.Now()
@@ -57,7 +63,7 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 
 	if CheckBinary(apksignerBinary) == nil {
 		cmdRes, err := a.runner.Run(ctx, apksignerBinary, []string{
-			"verify", "--print-certs", "--verbose", target,
+			"verify", "--print-certs", "--verbose", "--", target,
 		}, apksignerTo, nil)
 		if cmdRes != nil {
 			scheme, certFP, signerCount, debug = parseApksignerOutput(cmdRes.Stdout + cmdRes.Stderr)
@@ -151,7 +157,9 @@ func parseApksignerOutput(out string) (scheme, certFP, signerCount, debug string
 		case strings.Contains(low, "verified using v1") && strings.Contains(low, ": true") && scheme == "":
 			scheme = "v1"
 		case strings.Contains(low, "number of signers:"):
-			explicitSigners = atoiSafe(strings.TrimSpace(line[strings.Index(line, ":")+1:]))
+			if n, ok := parseCountAfterColon(line); ok {
+				explicitSigners = n
+			}
 		case strings.Contains(low, "signer #") && strings.Contains(low, "certificate dn:"):
 			// One line per signer; the DN also carries the debug flag.
 			signers++
@@ -172,9 +180,29 @@ func parseApksignerOutput(out string) (scheme, certFP, signerCount, debug string
 	case signers > 0:
 		signerCount = strconv.Itoa(signers)
 	default:
-		signerCount = "0"
+		// Unknown, not zero: reporting "0" would claim the APK has no
+		// signer when the output was merely unparsable.
+		signerCount = "unknown"
 	}
 	return scheme, certFP, signerCount, debug
+}
+
+// parseCountAfterColon reads an integer that follows the last colon of a
+// "key: value" line. It reports false when the value is not a number.
+func parseCountAfterColon(line string) (int, bool) {
+	idx := strings.LastIndex(line, ":")
+	if idx < 0 || idx+1 >= len(line) {
+		return 0, false
+	}
+	value := strings.TrimSpace(line[idx+1:])
+	if value == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // metaInfHeuristic inspects the APK's META-INF directory for signature files.
@@ -235,7 +263,7 @@ func AndroidManifestInfo(workdir string) models.AppInventory {
 	if manifestPath == "" {
 		return info
 	}
-	data, err := os.ReadFile(manifestPath) //nolint:gosec
+	data, err := readFileCapped(manifestPath, maxManifestBytes)
 	if err != nil {
 		return info
 	}
@@ -276,7 +304,7 @@ func applyApktoolYML(workdir string, info *models.AppInventory) {
 		workdir,
 	} {
 		path := filepath.Join(dir, "apktool.yml")
-		data, err := os.ReadFile(path) //nolint:gosec
+		data, err := readFileCapped(path, maxManifestBytes)
 		if err != nil {
 			continue
 		}
@@ -322,7 +350,7 @@ func IOSAppInfo(workdir string) models.AppInventory {
 	if bundle == "" {
 		return info
 	}
-	if data, err := os.ReadFile(filepath.Join(bundle, "Info.plist")); err == nil { //nolint:gosec
+	if data, err := readFileCapped(filepath.Join(bundle, "Info.plist"), maxManifestBytes); err == nil {
 		if m, err := decodePlistMapAny(data); err == nil {
 			info.BundleID = strOr(m["CFBundleIdentifier"])
 			info.VersionName = strOr(m["CFBundleShortVersionString"])

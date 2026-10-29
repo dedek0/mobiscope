@@ -110,14 +110,41 @@ func TestInventory_AnalyzeNetworkSecurityConfig(t *testing.T) {
 
 	// src="system" trust-anchors is the Android default and is NOT a finding;
 	// only cleartext + pin-set should be reported here.
-	assert.Len(t, findings, 2)
+	assert.Len(t, findings, 3)
 
 	categories := make(map[string]bool)
+	titles := ""
 	for _, f := range findings {
 		categories[string(f.Category)] = true
+		titles += f.Title + "|"
 	}
 	assert.True(t, categories["network_config"])
 	assert.True(t, categories["pinning_indicator"])
+	// A pin set without an expiration date is reported.
+	assert.Contains(t, titles, "no expiration")
+}
+
+func TestInventory_AnalyzeNetworkSecurityConfig_ExpiredPinSet(t *testing.T) {
+	dir := t.TempDir()
+	nscDir := filepath.Join(dir, "jadx", "res", "xml")
+	require.NoError(t, os.MkdirAll(nscDir, 0o755))
+	nsc := `<?xml version="1.0"?>
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">example.com</domain>
+        <pin-set expiration="2020-01-01">
+            <pin digest="SHA-256">abc123=</pin>
+        </pin-set>
+    </domain-config>
+</network-security-config>`
+	require.NoError(t, os.WriteFile(filepath.Join(nscDir, "network_security_config.xml"), []byte(nsc), 0o600))
+
+	findings := NewInventory().analyzeNetworkSecurityConfig(filepath.Join(dir, "jadx"), "s")
+	titles := ""
+	for _, f := range findings {
+		titles += f.Title + "|"
+	}
+	assert.Contains(t, titles, "expired")
 }
 
 func TestInventory_AnalyzeNetworkSecurityConfig_NoFile(t *testing.T) {

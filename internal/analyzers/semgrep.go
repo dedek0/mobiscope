@@ -53,6 +53,7 @@ func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (model
 		"--sarif",
 		"--output", outPath,
 		"--quiet",
+		"--",
 		sourceDir,
 	}
 
@@ -63,20 +64,25 @@ func (s *Semgrep) Run(ctx context.Context, target string, workdir string) (model
 		result.ExitCode = cmdResult.ExitCode
 	}
 
+	// Read the report even when the tool failed: a run that produced
+	// findings and then errored still carries usable evidence, and
+	// dropping it silently understates the risk.
+	if data, readErr := readFileCapped(outPath, maxToolReportBytes); readErr == nil {
+		result.Output = json.RawMessage(data)
+		// The SARIF file can contain snippets of the scanned source.
+		_ = os.Chmod(outPath, 0o600)
+	} else if cmdResult != nil && json.Valid([]byte(cmdResult.Stdout)) {
+		// stdout fallback: pass valid JSON through untouched (SARIF is an
+		// object; only gitleaks emits a JSON array and has its own converter).
+		result.Output = json.RawMessage([]byte(strings.TrimSpace(cmdResult.Stdout)))
+	}
+
 	if err != nil {
 		var exitErr *ErrExit
 		if !errors.As(err, &exitErr) || exitErr.Code != 0 {
 			result.Error = err.Error()
 			return result, fmt.Errorf("semgrep execution failed: %w", err)
 		}
-	}
-
-	if data, readErr := os.ReadFile(outPath); readErr == nil { //nolint:gosec
-		result.Output = json.RawMessage(data)
-	} else if cmdResult != nil && json.Valid([]byte(cmdResult.Stdout)) {
-		// stdout fallback: pass valid JSON through untouched (SARIF is an
-		// object; only gitleaks emits a JSON array and has its own converter).
-		result.Output = json.RawMessage([]byte(strings.TrimSpace(cmdResult.Stdout)))
 	}
 
 	return result, nil

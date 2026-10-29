@@ -2,6 +2,7 @@ package analyzers
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,9 +19,32 @@ const (
 	machoTimeout   = 2 * time.Minute
 )
 
+// Mach-O magic numbers.
+const (
+	mhMagic32  = 0xfeedface
+	mhMagic64  = 0xfeedfacf
+	mhCigam32  = 0xcefaedfe
+	mhCigam64  = 0xcffaedfe
+	mhFat      = 0xcafebabe
+	mhFat64    = 0xcafebabf
+	mhMaxFats  = 16
+	mhMaxCmds  = 4096
+	mhLoadBias = 0x01000000
+)
+
+// Load command identifiers.
+const (
+	lcLoadDylib      = 0x0c
+	lcLoadWeakDylib  = 0x18
+	lcReexportDylib  = 0x1f
+	lcLoadUpwardDyl  = 0x23
+	lcEncryptionInfo = 0x21
+	lcEncryption64   = 0x2c
+)
+
 // MachO inspects Mach-O binaries in the extracted app for hardening and
-// native-code findings. Prefers llvm-objdump when available; otherwise falls
-// back to reading load-command signatures in-process.
+// native-code findings. The parsing is fully in-process: no external binary
+// is required, so the stage is always available.
 type MachO struct {
 	runner CommandRunner
 }
@@ -35,14 +59,12 @@ func NewMachOWithRunner(runner CommandRunner) *MachO {
 
 func (m *MachO) Name() string { return machoName }
 
-// Available is satisfied when either llvm-objdump is present (richer output)
-// or we can fall back to the in-process parser.
-func (m *MachO) Available() error {
-	if err := CheckBinary(llvmObjdumpBin); err == nil {
-		return nil
-	}
-	return nil
-}
+// Available always succeeds: the analyzer parses Mach-O headers in-process
+// and does not shell out to llvm-objdump.
+func (m *MachO) Available() error { return nil }
+
+// Phase marks the analyzer as a scanner: it reads the extracted bundle.
+func (m *MachO) Phase() Phase { return PhaseScanner }
 
 func (m *MachO) Run(_ context.Context, target string, workdir string) (models.ToolResult, error) {
 	start := time.Now()
@@ -111,7 +133,10 @@ func ConvertMachOFindings(raw []byte, sessionID string) []models.Finding {
 				fmt.Sprintf("%s is encrypted (LC_ENCRYPTION_INFO cryptid != 0); its body is not statically analyzable.", lib.Path),
 				"cryptid!=0", models.CategoryBinaryHardening, models.SeverityInfo, models.SensitivityInternal, 0.9)
 		}
-		if lib.Kind == "main_binary" && !containsStr(lib.Archs, "arm64") {
+		// Only report a missing arm64 slice when the architecture list was
+		// actually recovered; an unparseable binary is not evidence of a
+		// legacy build.
+		if lib.Kind == "main_binary" && len(lib.Archs) > 0 && !containsStr(lib.Archs, "arm64") {
 			add(lib, "Missing arm64 slice",
 				"Main binary has no arm64 slice; modern iOS devices require it and its absence often indicates a legacy build.",
 				"archs="+strings.Join(lib.Archs, ","), models.CategoryBinaryHardening, models.SeverityMedium, models.SensitivityInternal, 0.6)
@@ -173,12 +198,16 @@ func isMachOMagic(m [4]byte) bool {
 		return true
 	case [4]byte{0xca, 0xfe, 0xba, 0xbe}: // FAT (also Java class; caller disambiguates)
 		return true
+	case [4]byte{0xca, 0xfe, 0xba, 0xbf}: // FAT 64-bit
+		return true
 	default:
 		return false
 	}
 }
 
 // inspectBinary extracts a lightweight NativeLib record from a Mach-O file.
+// Universal (FAT) binaries are walked slice by slice so the architecture
+// list, the encryption flag and the linked dylibs reflect the real slices.
 func inspectBinary(path, rel string) models.NativeLib {
 	lib := models.NativeLib{
 		Path: rel,
@@ -201,124 +230,244 @@ func inspectBinary(path, rel string) models.NativeLib {
 		return lib
 	}
 
-	var magic [4]byte
-	copy(magic[:], data[:4])
-	if !isMachOMagic(magic) {
+	if !isMachOMagic([4]byte{data[0], data[1], data[2], data[3]}) {
 		return lib
 	}
 
-	// Detect FAT (universal) and record slice count as a rough arch list.
-	if magic == [4]byte{0xca, 0xfe, 0xba, 0xbe} && len(data) >= 8 {
-		nfat := int(data[7]) | int(data[6])<<8 | int(data[5])<<16 | int(data[4])<<24
-		if nfat > 0 && nfat < 16 {
-			for i := 0; i < nfat; i++ {
-				lib.Archs = append(lib.Archs, fmt.Sprintf("fat%d", i))
-			}
+	if isFAT(data) {
+		parseFAT(data, &lib)
+	} else {
+		arch, enc, dylibs := parseMachOSlice(data, 0)
+		if arch != "" {
+			lib.Archs = append(lib.Archs, arch)
 		}
-	} else if magic == [4]byte{0xcf, 0xfa, 0xed, 0xfe} || magic == [4]byte{0xce, 0xfa, 0xed, 0xfe} { //nolint:gocritic // two-value match is clearer than a switch here
-		// Little-endian Mach-O. cputype at offset 4.
-		cpu := uint32(data[4]) | uint32(data[5])<<8 | uint32(data[6])<<16 | uint32(data[7])<<24
-		switch cpu {
-		case 0x0100000c: // CPU_TYPE_ARM64
-			lib.Archs = append(lib.Archs, "arm64")
-		case 0x0000000c: // CPU_TYPE_ARM
-			lib.Archs = append(lib.Archs, "armv7")
-		case 0x01000007: // CPU_TYPE_X86_64
-			lib.Archs = append(lib.Archs, "x86_64")
-		case 0x00000007:
-			lib.Archs = append(lib.Archs, "i386")
-		default:
-			lib.Archs = append(lib.Archs, fmt.Sprintf("cpu_%x", cpu))
-		}
+		lib.Encrypted = enc
+		lib.Linked = dedupeStrings(dylibs)
 	}
 
-	// Heuristics on raw bytes.
-	if strings.Contains(string(data), "__LINKEDIT") {
-		lib.InstallName = ""
+	// A Mach-O install name lives in LC_ID_DYLIB; look for it so the
+	// relative-path injection check has data to work with.
+	if name := extractInstallName(data); name != "" {
+		lib.InstallName = name
 	}
-	for _, sig := range []string{"_objc_release", "_swift_release", "Swift"} {
-		if strings.Contains(string(data), sig) {
-			break
-		}
-	}
-	// Encryption is detected via the LC_ENCRYPTION_INFO(64) command's cryptid.
-	lib.Encrypted = hasEncryptionCommand(data)
-
-	// Linked dylibs are visible as NUL-terminated @rpath/ or /System/ paths.
-	lib.Linked = extractDylibPaths(data)
 
 	return lib
 }
 
-func hasEncryptionCommand(data []byte) bool {
-	// LC_ENCRYPTION_INFO = 0x21, LC_ENCRYPTION_INFO_64 = 0x2c.
-	// Scanning the whole file for these cmd values would be noisy; we do a
-	// bounded scan of the load-command region instead.
-	if len(data) < 64 {
+// isFAT reports whether data starts with a FAT (universal) header.
+func isFAT(data []byte) bool {
+	if len(data) < 8 {
 		return false
 	}
-	// 64-bit LE Mach-O header is 32 bytes, then ncmds (4) + sizeofcmds (4).
-	ncmds := int(data[16]) | int(data[17])<<8 | int(data[18])<<16 | int(data[19])<<24
-	if ncmds <= 0 || ncmds > 256 {
-		return false
+	magic := binary.BigEndian.Uint32(data[:4])
+	return magic == mhFat || magic == mhFat64
+}
+
+// parseFAT walks the universal-binary container and merges the per-slice
+// information into lib.
+func parseFAT(data []byte, lib *models.NativeLib) {
+	magic := binary.BigEndian.Uint32(data[:4])
+	is64 := magic == mhFat64
+
+	nfat := int(binary.BigEndian.Uint32(data[4:8]))
+	if nfat <= 0 || nfat > mhMaxFats {
+		return
 	}
-	off := 32
-	for i := 0; i < ncmds && off+8 <= len(data); i++ {
-		cmd := uint32(data[off]) | uint32(data[off+1])<<8 | uint32(data[off+2])<<16 | uint32(data[off+3])<<24
-		cmdsize := int(data[off+4]) | int(data[off+5])<<8 | int(data[off+6])<<16 | int(data[off+7])<<24
-		if cmd == 0x21 || cmd == 0x2c {
-			// cryptid is at cmd+16 (LC_ENCRYPTION_INFO) / cmd+16 (64-bit too).
-			if off+20 <= len(data) {
-				cryptid := int(data[off+16]) | int(data[off+17])<<8 | int(data[off+18])<<16 | int(data[off+19])<<24
-				return cryptid != 0
-			}
+
+	entrySize := 20
+	if is64 {
+		entrySize = 32
+	}
+
+	off := 8
+	for i := 0; i < nfat; i++ {
+		if off+entrySize > len(data) {
+			break
 		}
+		var sliceOff int
+		if is64 {
+			sliceOff = int(binary.BigEndian.Uint64(data[off+8 : off+16]))
+		} else {
+			sliceOff = int(binary.BigEndian.Uint32(data[off+8 : off+12]))
+		}
+		if sliceOff < 0 || sliceOff >= len(data) {
+			off += entrySize
+			continue
+		}
+		arch, enc, dylibs := parseMachOSlice(data, sliceOff)
+		if arch != "" && !containsStr(lib.Archs, arch) {
+			lib.Archs = append(lib.Archs, arch)
+		}
+		if enc {
+			lib.Encrypted = true
+		}
+		lib.Linked = append(lib.Linked, dylibs...)
+		off += entrySize
+	}
+	lib.Linked = dedupeStrings(lib.Linked)
+}
+
+// parseMachOSlice parses one Mach-O image at the given offset and returns
+// its architecture, whether it is encrypted and the dylibs it links.
+func parseMachOSlice(data []byte, base int) (arch string, encrypted bool, dylibs []string) {
+	if base < 0 || base+28 > len(data) {
+		return "", false, nil
+	}
+
+	var order binary.ByteOrder = binary.LittleEndian
+	var is64 bool
+	switch binary.LittleEndian.Uint32(data[base:]) {
+	case mhMagic64:
+		is64 = true
+	case mhMagic32:
+		is64 = false
+	case mhCigam64:
+		is64, order = true, binary.BigEndian
+	case mhCigam32:
+		is64, order = false, binary.BigEndian
+	default:
+		return "", false, nil
+	}
+
+	arch = archForCPU(order.Uint32(data[base+4:]))
+
+	ncmds := order.Uint32(data[base+16:])
+	if ncmds == 0 || ncmds > mhMaxCmds {
+		return arch, false, nil
+	}
+
+	hdrSize := 28
+	if is64 {
+		hdrSize = 32
+	}
+
+	off := base + hdrSize
+	for i := 0; i < int(ncmds); i++ {
+		if off+8 > len(data) {
+			break
+		}
+		cmd := order.Uint32(data[off:])
+		cmdsize := int(order.Uint32(data[off+4:]))
 		if cmdsize < 8 {
 			break
 		}
-		off += cmdsize
-	}
-	return false
-}
+		if off+cmdsize > len(data) {
+			break
+		}
 
-func extractDylibPaths(data []byte) []string {
-	seen := map[string]bool{}
-	var out []string
-	// LC_LOAD_DYLIB = 0x0c, LC_LOAD_WEAK_DYLIB = 0x18, LC_REEXPORT_DYLIB = 0x1f.
-	if len(data) < 64 {
-		return nil
-	}
-	ncmds := int(data[16]) | int(data[17])<<8 | int(data[18])<<16 | int(data[19])<<24
-	if ncmds <= 0 || ncmds > 256 {
-		return nil
-	}
-	off := 32
-	for i := 0; i < ncmds && off+24 <= len(data); i++ {
-		cmd := uint32(data[off]) | uint32(data[off+1])<<8 | uint32(data[off+2])<<16 | uint32(data[off+3])<<24
-		cmdsize := int(data[off+4]) | int(data[off+5])<<8 | int(data[off+6])<<16 | int(data[off+7])<<24
-		if cmd == 0x0c || cmd == 0x18 || cmd == 0x1f {
-			// dylib name offset at +8, then a NUL-terminated path.
-			nameOff := int(data[off+8]) | int(data[off+9])<<8 | int(data[off+10])<<16 | int(data[off+11])<<24
-			if nameOff > 0 && off+nameOff < len(data) {
-				end := off + cmdsize
-				if end > len(data) {
-					end = len(data)
-				}
-				seg := data[off+nameOff : end]
-				if idx := indexByte(seg, 0); idx > 0 {
-					p := string(seg[:idx])
-					if (strings.HasPrefix(p, "/System/") || strings.HasPrefix(p, "@rpath") ||
-						strings.HasPrefix(p, "@executable_path") || strings.HasPrefix(p, "@loader_path")) && !seen[p] {
-						seen[p] = true
-						out = append(out, p)
+		switch cmd {
+		case lcEncryptionInfo, lcEncryption64:
+			if off+20 <= len(data) && order.Uint32(data[off+16:]) != 0 {
+				encrypted = true
+			}
+		case lcLoadDylib, lcLoadWeakDylib, lcReexportDylib, lcLoadUpwardDyl,
+			lcLoadDylib | mhLoadBias, lcLoadWeakDylib | mhLoadBias,
+			lcReexportDylib | mhLoadBias, lcLoadUpwardDyl | mhLoadBias:
+			// The dylib name offset is relative to the start of the load
+			// command and must stay inside it. A crafted command with an
+			// out-of-range offset used to panic here.
+			if off+12 <= len(data) {
+				nameOff := int(order.Uint32(data[off+8:]))
+				if nameOff > 0 && nameOff < cmdsize {
+					start := off + nameOff
+					end := off + cmdsize
+					if end > len(data) {
+						end = len(data)
+					}
+					if start < end {
+						if idx := indexByte(data[start:end], 0); idx > 0 {
+							dylibs = append(dylibs, string(data[start:start+idx]))
+						}
 					}
 				}
 			}
 		}
-		if cmdsize < 8 {
+
+		off += cmdsize
+	}
+
+	return arch, encrypted, dylibs
+}
+
+// extractInstallName returns the install name declared by LC_ID_DYLIB, if
+// the binary is a dylib.
+func extractInstallName(data []byte) string {
+	if len(data) < 28 {
+		return ""
+	}
+	order := binary.ByteOrder(binary.LittleEndian)
+	switch order.Uint32(data[:4]) {
+	case mhCigam64, mhCigam32:
+		order = binary.BigEndian
+	}
+	cpu := order.Uint32(data[4:12])
+	if cpu != 0x0100000c && cpu != 0x0000000c {
+		// Only dylibs carry LC_ID_DYLIB; skip the load-command walk for
+		// executables.
+		return ""
+	}
+	ncmds := order.Uint32(data[16:20])
+	if ncmds == 0 || ncmds > mhMaxCmds {
+		return ""
+	}
+	off := 32
+	for i := 0; i < int(ncmds) && off+12 <= len(data); i++ {
+		cmd := order.Uint32(data[off:])
+		cmdsize := int(order.Uint32(data[off+4:]))
+		if cmdsize < 8 || off+cmdsize > len(data) {
 			break
 		}
+		if cmd == 0xd {
+			nameOff := int(order.Uint32(data[off+8:]))
+			if nameOff > 0 && nameOff < cmdsize {
+				start := off + nameOff
+				end := off + cmdsize
+				if end > len(data) {
+					end = len(data)
+				}
+				if start < end {
+					if idx := indexByte(data[start:end], 0); idx > 0 {
+						return string(data[start : start+idx])
+					}
+				}
+			}
+		}
 		off += cmdsize
+	}
+	return ""
+}
+
+// archForCPU maps a Mach-O cpu type to a human-readable architecture.
+func archForCPU(cpu uint32) string {
+	switch cpu {
+	case 0x0100000c: // CPU_TYPE_ARM64
+		return "arm64"
+	case 0x0200000c: // CPU_TYPE_ARM64_32
+		return "arm64_32"
+	case 0x0000000c: // CPU_TYPE_ARM
+		return "armv7"
+	case 0x01000007: // CPU_TYPE_X86_64
+		return "x86_64"
+	case 0x00000007: // CPU_TYPE_X86
+		return "i386"
+	default:
+		return fmt.Sprintf("cpu_%x", cpu)
+	}
+}
+
+// dedupeStrings removes duplicates while preserving order.
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
 	}
 	return out
 }

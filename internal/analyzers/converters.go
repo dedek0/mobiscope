@@ -45,3 +45,11 @@ func (a *ClassDump) ConvertFindings(raw json.RawMessage, sessionID string) []mod
 func (a *ApkSigner) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
 	return ConvertApkSignerFindings(raw, sessionID)
 }
+
+func (a *ELF) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
+	return ConvertELFFindings(raw, sessionID)
+}
+
+func (a *AntiAnalysis) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
+	return ConvertAntiAnalysisFindings(raw, sessionID)
+}

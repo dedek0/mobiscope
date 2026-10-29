@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dedek0/mobiscope/internal/models"
 )
@@ -56,6 +58,14 @@ type component struct {
 	Process       string         `xml:"process,attr"`
 	GrantURI      string         `xml:"grantUriPermissions,attr"`
 	Authorities   string         `xml:"authorities,attr"`
+	TaskAffinity  string         `xml:"taskAffinity,attr"`
+	ReadPerm      string         `xml:"readPermission,attr"`
+	WritePerm     string         `xml:"writePermission,attr"`
+	Enabled       string         `xml:"enabled,attr"`
+	DirectBoot    string         `xml:"directBootAware,attr"`
+	Priority      string         `xml:"priority,attr"`
+	AllowBackup   string         `xml:"allowBackup,attr"`
+	Multiprocess  string         `xml:"multiprocess,attr"`
 	IntentFilters []intentFilter `xml:"intent-filter"`
 }
 
@@ -98,14 +108,25 @@ type queries struct {
 
 // parsedComponent flattens a component element with its kind.
 type parsedComponent struct {
-	Kind          string
-	Name          string
-	Exported      bool
-	Protected     bool
-	Process       string
-	GrantURI      bool
-	Auth          string
-	IntentFilters []parsedIntentFilter
+	Kind     string
+	Name     string
+	Exported bool
+	// ExportedExplicit records whether android:exported was present. A
+	// component with an intent-filter and no explicit attribute is
+	// implicitly exported on API levels below 31.
+	ExportedExplicit bool
+	Protected        bool
+	Process          string
+	GrantURI         bool
+	Auth             string
+	TaskAffinity     string
+	ReadPerm         string
+	WritePerm        string
+	Enabled          bool
+	DirectBoot       bool
+	Priority         int
+	AllowBackup      bool
+	IntentFilters    []parsedIntentFilter
 }
 
 type parsedIntentFilter struct {
@@ -148,14 +169,22 @@ func (m *androidManifest) components() []parsedComponent {
 			}
 		}
 		out = append(out, parsedComponent{
-			Kind:          kind,
-			Name:          c.Name,
-			Exported:      strings.EqualFold(c.Exported, "true"),
-			Protected:     c.Permission != "",
-			Process:       c.Process,
-			GrantURI:      strings.EqualFold(c.GrantURI, "true"),
-			Auth:          c.Authorities,
-			IntentFilters: filters,
+			Kind:             kind,
+			Name:             c.Name,
+			Exported:         strings.EqualFold(c.Exported, "true"),
+			ExportedExplicit: c.Exported != "",
+			Protected:        c.Permission != "",
+			Process:          c.Process,
+			GrantURI:         strings.EqualFold(c.GrantURI, "true"),
+			Auth:             c.Authorities,
+			TaskAffinity:     c.TaskAffinity,
+			ReadPerm:         c.ReadPerm,
+			WritePerm:        c.WritePerm,
+			Enabled:          !strings.EqualFold(c.Enabled, "false"),
+			DirectBoot:       strings.EqualFold(c.DirectBoot, "true"),
+			Priority:         atoiSafe(strings.TrimSpace(c.Priority)),
+			AllowBackup:      !strings.EqualFold(c.AllowBackup, "false"),
+			IntentFilters:    filters,
 		})
 	}
 	for _, c := range m.Application.Activities {
@@ -226,7 +255,7 @@ func isDangerousPermission(perm string) bool {
 // attribute order, comments and namespaced declarations are handled correctly.
 func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 	manifestPath := filepath.Join(dir, AndroidManifestFile)
-	data, err := os.ReadFile(manifestPath) //nolint:gosec
+	data, err := readFileCapped(manifestPath, maxManifestBytes)
 	if err != nil {
 		return nil
 	}
@@ -277,6 +306,62 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 				comp.Name+" grantUriPermissions=\"true\"",
 				models.SeverityHigh, models.SensitivityConfidential, 0.9))
 		}
+		if comp.Kind == "provider" && comp.Exported && comp.ReadPerm == "" && comp.WritePerm == "" {
+			findings = append(findings, manifestFinding(sessionID,
+				fmt.Sprintf("Exported provider without read/write permission: %s", comp.Name),
+				"The provider is exported and declares neither android:readPermission nor android:writePermission, so any app can read from it.",
+				comp.Name+" exported=\"true\" (no readPermission/writePermission)",
+				models.SeverityHigh, models.SensitivityConfidential, 0.85))
+		}
+
+		// A component with an intent-filter and no explicit android:exported
+		// is implicitly exported on API levels below 31.
+		implicitlyExported := !comp.ExportedExplicit && len(comp.IntentFilters) > 0
+		if implicitlyExported && !comp.Protected {
+			findings = append(findings, manifestFinding(sessionID,
+				fmt.Sprintf("Implicitly exported %s: %s", comp.Kind, comp.Name),
+				"The component declares an intent-filter but no android:exported attribute. On API levels below 31 it is exported by default, and it has no permission guard.",
+				comp.Name+" implicit export (intent-filter, no android:exported)",
+				models.SeverityHigh, models.SensitivityInternal, 0.8))
+		}
+
+		// A custom URI scheme on an exported activity can be hijacked by a
+		// malicious app that registers the same scheme.
+		for _, filter := range comp.IntentFilters {
+			for _, scheme := range filter.Schemes {
+				if scheme == "http" || scheme == "https" {
+					continue
+				}
+				if comp.Exported || implicitlyExported {
+					findings = append(findings, manifestFinding(sessionID,
+						fmt.Sprintf("Custom URI scheme %q is reachable from other apps: %s", scheme, comp.Name),
+						"Any app can register the same custom scheme and intercept the deep links, or receive the data they carry.",
+						comp.Name+" custom scheme=\""+scheme+"\"",
+						models.SeverityMedium, models.SensitivityInternal, 0.7))
+				}
+			}
+		}
+
+		// A receiver registered for a sensitive broadcast with a high
+		// priority can preempt other receivers.
+		if comp.Kind == "receiver" && comp.Priority >= 500 {
+			findings = append(findings, manifestFinding(sessionID,
+				fmt.Sprintf("High-priority broadcast receiver: %s", comp.Name),
+				fmt.Sprintf("The receiver declares android:priority=%d, which lets it receive a broadcast before other apps.", comp.Priority),
+				comp.Name+" android:priority=\""+strconv.Itoa(comp.Priority)+"\"",
+				models.SeverityLow, models.SensitivityInternal, 0.6))
+		}
+
+		// A task affinity equal to the package name lets another app with
+		// the same affinity reuse this app's task.
+		if comp.TaskAffinity != "" && m.Package != "" && comp.TaskAffinity == m.Package {
+			findings = append(findings, manifestFinding(sessionID,
+				fmt.Sprintf("Task affinity equal to the package name: %s", comp.Name),
+				"android:taskAffinity matches the package name, so another app signed with the same key (or with the same affinity) can reuse this task and appear as this app.",
+				comp.Name+" android:taskAffinity=\""+comp.TaskAffinity+"\"",
+				models.SeverityLow, models.SensitivityInternal, 0.6))
+		}
+
 		if !comp.Exported {
 			continue
 		}
@@ -300,6 +385,38 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 			title, desc,
 			comp.Name+" exported=\"true\"",
 			severity, sensitivity, 0.9))
+	}
+
+	// Backup exposure beyond the allowBackup flag: the newer
+	// dataExtractionRules and the legacy fullBackupContent decide which
+	// domains are copied.
+	if app.DataExtractionRules != "" {
+		findings = append(findings, manifestFinding(sessionID,
+			"Cloud backup rules are declared",
+			"android:dataExtractionRules is set, so the app defines what is copied to the cloud. Review the rules to make sure credentials and tokens are excluded.",
+			"android:dataExtractionRules=\""+app.DataExtractionRules+"\"",
+			models.SeverityInfo, models.SensitivityInternal, 0.7))
+	}
+	if app.FullBackupContent != "" {
+		findings = append(findings, manifestFinding(sessionID,
+			"Backup content rules are declared",
+			"android:fullBackupContent is set, so the app defines what `adb backup` copies. Review the rules to make sure credentials and tokens are excluded.",
+			"android:fullBackupContent=\""+app.FullBackupContent+"\"",
+			models.SeverityInfo, models.SensitivityInternal, 0.7))
+	}
+	if m.SharedUserID != "" {
+		findings = append(findings, manifestFinding(sessionID,
+			"Application shares a user ID",
+			fmt.Sprintf("android:sharedUserId=%q makes the app share its UID with every other app signed with the same key, which widens the blast radius of a compromise.", m.SharedUserID),
+			"android:sharedUserId=\""+m.SharedUserID+"\"",
+			models.SeverityMedium, models.SensitivityInternal, 0.8))
+	}
+	if strings.EqualFold(app.ExtractNativeLibs, "true") {
+		findings = append(findings, manifestFinding(sessionID,
+			"Native libraries are extracted to disk",
+			"android:extractNativeLibs=true extracts the .so files to the app's data directory, where they can be replaced by anything with write access to that directory.",
+			"android:extractNativeLibs=\"true\"",
+			models.SeverityLow, models.SensitivityInternal, 0.7))
 	}
 
 	for _, perm := range m.permissions() {
@@ -385,7 +502,7 @@ func resolveNSCPath(dir string, m *androidManifest) (string, string) {
 // Only genuine relaxations are reported: a stock <trust-anchors> block that
 // merely lists src="system" is NOT a finding.
 func (inv *Inventory) analyzeNetworkSecurityConfig(dir, sessionID string) []models.Finding {
-	data, err := os.ReadFile(filepath.Join(dir, AndroidManifestFile)) //nolint:gosec
+	data, err := readFileCapped(filepath.Join(dir, AndroidManifestFile), maxManifestBytes)
 	var m *androidManifest
 	if err == nil {
 		m, _ = decodeManifest(data)
@@ -396,7 +513,7 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir, sessionID string) []mode
 		return nil
 	}
 
-	raw, err := os.ReadFile(nscAbs) //nolint:gosec
+	raw, err := readFileCapped(nscAbs, maxManifestBytes)
 	if err != nil {
 		return nil
 	}
@@ -436,9 +553,62 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir, sessionID string) []mode
 			"The app uses network_security_config pin-set for certificate pinning.",
 			"<pin-set>",
 			models.CategoryPinningIndicator, models.SeverityInfo, models.SensitivityPublic, 1.0))
+
+		// A pin set that expires stops protecting the app silently once
+		// the date passes.
+		if exp, ok := pinSetExpiration(content); ok {
+			if time.Now().After(exp) {
+				findings = append(findings, nscFinding(sessionID, nscRel,
+					"Certificate pin set has expired",
+					fmt.Sprintf("The pin-set expired on %s; the pinned keys are no longer enforced, so a new certificate is accepted without any code change.", exp.Format("2006-01-02")),
+					"expiration=\""+exp.Format("2006-01-02")+"\"",
+					models.CategoryNetworkConfig, models.SeverityHigh, models.SensitivityConfidential, 0.9))
+			}
+		} else {
+			findings = append(findings, nscFinding(sessionID, nscRel,
+				"Certificate pin set has no expiration",
+				"The pin-set declares no expiration date, so the pins stay in force forever and a leaked key cannot be rotated out of the app.",
+				"<pin-set> without expiration",
+				models.CategoryPinningIndicator, models.SeverityInfo, models.SensitivityPublic, 0.8))
+		}
 	}
 
 	return findings
+}
+
+// pinSetExpiration extracts the expiration date of the first pin-set in a
+// network security config.
+func pinSetExpiration(content string) (time.Time, bool) {
+	idx := strings.Index(content, "<pin-set")
+	if idx < 0 {
+		return time.Time{}, false
+	}
+	rest := content[idx:]
+	end := strings.Index(rest, ">")
+	if end < 0 {
+		return time.Time{}, false
+	}
+	tag := rest[:end]
+	attrIdx := strings.Index(tag, "expiration=")
+	if attrIdx < 0 {
+		return time.Time{}, false
+	}
+	rest = tag[attrIdx+len("expiration="):]
+	if len(rest) == 0 || rest[0] != '"' {
+		return time.Time{}, false
+	}
+	rest = rest[1:]
+	closing := strings.IndexByte(rest, '"')
+	if closing < 0 {
+		return time.Time{}, false
+	}
+	value := rest[:closing]
+	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z07:00", time.RFC3339} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func nscFinding(sessionID, file, title, desc, snippet string, cat models.Category, sev models.Severity, sens models.Sensitivity, conf float64) models.Finding {

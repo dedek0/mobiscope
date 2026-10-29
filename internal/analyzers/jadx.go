@@ -47,6 +47,10 @@ func NewJADXWithRunner(cfg JADXConfig, runner CommandRunner) *JADX {
 
 func (a *JADX) Name() string { return jadxBinary }
 
+// Phase marks the analyzer as a decompiler: it produces the tree the
+// scanner stages read.
+func (a *JADX) Phase() Phase { return PhaseDecompiler }
+
 func (a *JADX) Available() error {
 	return CheckBinary(jadxBinary)
 }

@@ -3,6 +3,7 @@ package analyzers
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,9 +101,70 @@ func TestAnalyzeManifest_ExportedProviderWithGrant(t *testing.T) {
 
 	inv := NewInventory()
 	findings := inv.analyzeManifest(dir, "s")
-	// grantUriPermissions + exported provider = 2 findings
-	require.Len(t, findings, 2)
-	titles := []string{findings[0].Title, findings[1].Title}
-	assert.Contains(t, titles[0]+titles[1], "grants URI permissions")
-	assert.Contains(t, titles[0]+titles[1], "Exported provider")
+	// grantUriPermissions + exported provider + provider without a
+	// read/write permission = 3 findings
+	require.Len(t, findings, 3)
+	all := findings[0].Title + "|" + findings[1].Title + "|" + findings[2].Title
+	assert.Contains(t, all, "grants URI permissions")
+	assert.Contains(t, all, "Exported provider")
+	assert.Contains(t, all, "without read/write permission")
+
+	// Every finding must carry a distinct ID: two findings that share an
+	// ID would be collapsed by the dedup pass.
+	ids := map[string]bool{}
+	for _, f := range findings {
+		assert.False(t, ids[f.ID], "duplicate finding id %s", f.ID)
+		ids[f.ID] = true
+	}
+}
+
+func TestAnalyzeManifest_ImplicitExport(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `<?xml version="1.0"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
+    <application>
+        <activity android:name=".Leaky">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AndroidManifest.xml"), []byte(manifest), 0o600))
+
+	findings := NewInventory().analyzeManifest(dir, "s")
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Title, "Implicitly exported") {
+			found = true
+		}
+	}
+	assert.True(t, found, "an activity with an intent-filter and no android:exported must be reported")
+}
+
+func TestAnalyzeManifest_CustomSchemeAndBackupRules(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `<?xml version="1.0"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app" android:sharedUserId="com.example.shared">
+    <application android:dataExtractionRules="@xml/data_extraction_rules" android:fullBackupContent="@xml/backup_rules">
+        <activity android:name=".Deep" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <data android:scheme="myapp"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AndroidManifest.xml"), []byte(manifest), 0o600))
+
+	findings := NewInventory().analyzeManifest(dir, "s")
+	all := ""
+	for _, f := range findings {
+		all += f.Title + "|"
+	}
+	assert.Contains(t, all, "Custom URI scheme")
+	assert.Contains(t, all, "Cloud backup rules")
+	assert.Contains(t, all, "Backup content rules")
+	assert.Contains(t, all, "shares a user ID")
 }

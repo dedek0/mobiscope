@@ -1,20 +1,28 @@
 package analyzers
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/dedek0/mobiscope/internal/rules"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
-// rulePack loads one of the shipped semgrep packs from the repo.
+// rulePack loads one of the shipped semgrep packs from the embedded copy,
+// which is what actually reaches the user.
 func rulePack(t *testing.T, rel string) map[string]interface{} {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", rel))
-	require.NoError(t, err, "rule pack %s must exist", rel)
+	var data []byte
+	switch rel {
+	case "rules/mastg/rules.yaml":
+		data = rules.AndroidYAML()
+	case "rules/mastg-ios/rules.yaml":
+		data = rules.IOSYAML()
+	default:
+		t.Fatalf("unknown rule pack %s", rel)
+	}
+	require.NotEmpty(t, data, "rule pack %s must exist", rel)
 
 	var root map[string]interface{}
 	require.NoError(t, yaml.Unmarshal(data, &root), "rule pack %s must be valid YAML", rel)

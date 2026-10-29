@@ -134,14 +134,16 @@ func TestCheckBinary_NotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in PATH")
 }
 
-func TestParseVersion(t *testing.T) {
-	v := ParseVersion("ls")
-	assert.NotEqual(t, "unknown", v)
-	assert.NotEmpty(t, v)
-}
-
 func TestParseVersion_Unknown(t *testing.T) {
 	v := ParseVersion("nonexistent_binary_12345")
+	assert.Equal(t, "unknown", v)
+}
+
+func TestParseVersion_NotOnAllowlist(t *testing.T) {
+	// A binary outside the allowlist is never executed, not even for a
+	// read-only version probe.
+	ResetVersionCache()
+	v := ParseVersion("ls")
 	assert.Equal(t, "unknown", v)
 }
 
