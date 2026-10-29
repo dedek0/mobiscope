@@ -48,6 +48,7 @@ const (
 	CategoryEntitlement      Category = "entitlement"
 	CategoryBinaryHardening  Category = "binary_hardening"
 	CategoryObfuscation      Category = "obfuscation"
+	CategoryAntiAnalysis     Category = "anti_analysis"
 	CategoryNativeCode       Category = "native_code"
 	CategoryPrivacy          Category = "privacy"
 )

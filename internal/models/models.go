@@ -22,7 +22,10 @@ type AnalysisSession struct {
 	Status          SessionStatus `json:"status"`
 	ToolResults     []ToolResult  `json:"tool_results"`
 	Findings        []Finding     `json:"findings"`
-	Summary         string        `json:"summary,omitempty"`
+	// FailedTools lists the tools that errored during the run. A non-empty
+	// list means the report is partial even when the status is completed.
+	FailedTools []string `json:"failed_tools,omitempty"`
+	Summary     string   `json:"summary,omitempty"`
 	// LLMCostUSD is the cumulative cost of LLM triage for this session (0
 	// when triage did not run).
 	LLMCostUSD float64 `json:"llm_cost_usd,omitempty"`
@@ -35,8 +38,20 @@ const (
 	StatusPending   SessionStatus = "pending"
 	StatusRunning   SessionStatus = "running"
 	StatusCompleted SessionStatus = "completed"
-	StatusFailed    SessionStatus = "failed"
+	// StatusPartial marks a session that finished every stage it could run
+	// but at least one tool failed. The report is usable but incomplete.
+	StatusPartial SessionStatus = "partial"
+	StatusFailed  SessionStatus = "failed"
 )
+
+// IsTerminal reports whether the session reached a final state.
+func (s SessionStatus) IsTerminal() bool {
+	switch s {
+	case StatusCompleted, StatusPartial, StatusFailed:
+		return true
+	}
+	return false
+}
 
 // ToolResult represents the output of an external analysis tool.
 type ToolResult struct {
@@ -177,6 +192,50 @@ type AppInventory struct {
 	// scanned sources; URLs is a bounded unique sample (Android only).
 	URLCount int      `json:"url_count,omitempty"`
 	URLs     []string `json:"urls,omitempty"`
+	// SDKs lists the third-party libraries detected in the app.
+	SDKs []SDK `json:"sdks,omitempty"`
+	// Vulnerabilities lists the known vulnerabilities found for the
+	// detected SDKs. It is only populated when the OSV lookup is enabled.
+	Vulnerabilities []Vulnerability `json:"vulnerabilities,omitempty"`
+}
+
+// SDK is a third-party library detected in the app.
+type SDK struct {
+	// Name is the human-readable name of the library.
+	Name string `json:"name"`
+	// Group is the vendor or Maven group id.
+	Group string `json:"group,omitempty"`
+	// Artifact is the library name inside the group.
+	Artifact string `json:"artifact,omitempty"`
+	// Version is the detected version, when one could be recovered.
+	Version string `json:"version,omitempty"`
+	// Package is the full package coordinate, e.g.
+	// "com.google.code.gson:gson".
+	Package string `json:"package,omitempty"`
+	// Evidence is the class or resource that identified the library.
+	Evidence string `json:"evidence,omitempty"`
+	// Confidence is how sure the detection is.
+	Confidence float64 `json:"confidence"`
+}
+
+// Vulnerability is a known vulnerability affecting a detected SDK.
+type Vulnerability struct {
+	// ID is the advisory identifier (for example a GHSA id).
+	ID string `json:"id"`
+	// Summary is the advisory title.
+	Summary string `json:"summary,omitempty"`
+	// Severity is the advisory severity, when the database reports one.
+	Severity string `json:"severity,omitempty"`
+	// Package is the affected package.
+	Package string `json:"package"`
+	// Version is the affected version, when known.
+	Version string `json:"version,omitempty"`
+	// FixedIn lists the versions that carry the fix.
+	FixedIn []string `json:"fixed_in,omitempty"`
+	// Aliases lists the other identifiers of the advisory.
+	Aliases []string `json:"aliases,omitempty"`
+	// Reference is the advisory URL.
+	Reference string `json:"reference,omitempty"`
 }
 
 // ObfuscationInfo records code-obfuscation signals and a 0..1 score.
@@ -197,6 +256,23 @@ type NativeLib struct {
 	InstallName string   `json:"install_name,omitempty"`
 	Linked      []string `json:"linked,omitempty"`
 	Version     string   `json:"version,omitempty"`
+
+	// Hardening facts. The pointers are nil when the property could not be
+	// determined (stripped binary, unusual layout), which is different from
+	// "absent".
+	PIE         *bool  `json:"pie,omitempty"`
+	RELRO       string `json:"relro,omitempty"` // full | partial | none
+	NX          *bool  `json:"nx,omitempty"`
+	StackCanary *bool  `json:"stack_canary,omitempty"`
+	Fortify     *bool  `json:"fortify,omitempty"`
+	Stripped    bool   `json:"stripped,omitempty"`
+	TextRelocs  bool   `json:"text_relocs,omitempty"`
+	HasRPath    bool   `json:"has_rpath,omitempty"`
+	// JNIExports lists the Java_* symbols the library exposes.
+	JNIExports []string `json:"jni_exports,omitempty"`
+	// AntiAnalysis lists the instrumentation and anti-debug markers found
+	// in the binary's strings.
+	AntiAnalysis []string `json:"anti_analysis,omitempty"`
 }
 
 // NetworkPolicy summarizes the app's network security posture.
