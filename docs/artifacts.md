@@ -23,6 +23,7 @@ Everything below is written by `internal/pipeline/pipeline.go`
 ├── gitleaks-report.json         # raw gitleaks report       (if stage ran)
 ├── semgrep.sarif                # raw semgrep SARIF         (if stage ran)
 ├── inventory.json               # AppInventory (pipeline)
+├── sbom.cdx.json                # CycloneDX 1.5 bill of materials (--sbom)
 ├── findings.json                # []Finding
 ├── session.json                 # AnalysisSession
 ├── meta.json                    # run + per-tool metadata
@@ -47,6 +48,7 @@ Everything below is written by `internal/pipeline/pipeline.go`
 | `findings.json`, `session.json`, `report.md`, `report.sarif` | `PersistArtifacts` (phase 7) | again after `--triage`, so LLM enrichment is not lost |
 | `meta.json` | `persistMeta` | once per run |
 | `inventory.json` | pipeline phase 3b | once per run (always, even when `inventory` is not a selected stage) |
+| `sbom.cdx.json` | `--sbom` flag, after the pipeline | once per run |
 | `gitleaks-report.json`, `semgrep.sarif` | external tools | each time the stage runs |
 | `SHA256SUMS` | **not implemented** | planned in PENDING.md §2.4 (chain of custody); today the SHA-256 only appears as `apk_hash` (session.json) / `apk_sha256` (meta.json) |
 
@@ -476,8 +478,11 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
 | `debuggable` | bool | Android only (`android:debuggable`) |
 | `permissions` | []string | Android only (declared `<uses-permission>` entries) |
 | `network` | object | both; only `kind` is populated today (`network_security_config` / `NSAppTransportSecurity`) |
-| `obfuscation` | object | always emitted as `{}` today — no collector fills it |
-| `native_libs`, `entitlements`, `url_schemes` | — | schema-reserved: never written by the current collectors (native libs live in the `macho` stage output instead) |
+| `obfuscation` | object | always emitted as `{}` today — obfuscation signals are reported as `anti_analysis`/`obfuscation` findings, not inventory |
+| `native_libs` | []object | Android only, `omitempty`: populated by the `elf` stage (hardening flags, JNI exports, anti-analysis strings) |
+| `sdks` | []object | Android only, `omitempty`: third-party libraries detected by the `sdk` stage (`name`, `group`, `artifact`, `version`, `package`, `evidence`, `confidence`) |
+| `vulnerabilities` | []object | Android only, `omitempty`: OSV advisories for `sdks`, written only with `--osv` (`id`, `summary`, `severity`, `package`, `version`, `fixed_in`, `aliases`, `reference`) |
+| `entitlements`, `url_schemes` | — | schema-reserved: never written by the current collectors |
 | `url_count` | int | Android only, `omitempty`: total generic `http(s)://` matches in the scanned tree (the generic URL rule was demoted from findings to this aggregate) |
 | `urls` | []string | Android only, `omitempty`: up to 100 unique normalized URLs, sorted — a sample, not the full set |
 
@@ -524,6 +529,21 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
 
 `session.json.app` embeds exactly this object, and `package_name` /
 `version_name` on the session are copied from it when non-empty.
+
+## sbom.cdx.json
+
+CycloneDX 1.5 bill of materials written by `analyze --sbom`
+(`internal/sbom`). It is rendered from the session inventory, so it reflects
+the `sdk` and `elf` stages even when the report itself is not regenerated.
+
+- One `library` component per detected SDK, with a Maven PURL when the
+  coordinates are known (`pkg:maven/<group>/<artifact>@<version>`).
+- One `library` component per native library, with the ABIs in a
+  `mobiscope:architectures` property.
+- Metadata carries the app component and `mobiscope:package_name`,
+  `mobiscope:apk_sha256` and `mobiscope:signing_cert` properties.
+- Vulnerabilities are **not** embedded in the SBOM; they are findings in
+  `findings.json` (and surface in the SARIF export) when `--osv` is used.
 
 ## report.sarif
 

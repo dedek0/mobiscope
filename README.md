@@ -64,7 +64,7 @@ before exposing the API.
 ```bash
 # Android
 ./bin/mobiscope analyze app.apk
-./bin/mobiscope analyze app.apk --stages apktool,jadx,gitleaks,semgrep
+./bin/mobiscope analyze app.apk --stages apktool,jadx,elf,anti-analysis,repack,sdk,gitleaks,semgrep
 
 # Batch: several targets in one run (per-target session dirs + summary table)
 ./bin/mobiscope analyze a.apk b.ipa c.apk
@@ -78,6 +78,15 @@ before exposing the API.
 
 # Verify the binary is the one you meant to analyze
 ./bin/mobiscope analyze app.apk --expect-sha256 <hex>
+
+# Check the expected signing certificate (repackaging signal)
+./bin/mobiscope analyze app.apk --expect-cert <hex>
+
+# Enrich the inventory with OSV.dev advisories (opt-in; uses the network)
+./bin/mobiscope analyze app.apk --osv
+
+# Write a CycloneDX 1.5 SBOM next to the report
+./bin/mobiscope analyze app.apk --sbom
 
 # List stages without running
 ./bin/mobiscope analyze app.apk --dry-run
@@ -254,6 +263,10 @@ mobiscope is a **static** analysis harness. Deliberate non-goals:
 - Exit code 4 means a provider was unavailable or a cloud policy blocked the call.
 - API keys come from environment variables, never from committed config.
 - Untrusted app content is fenced in `<untrusted_data>` before hitting an LLM.
+- Credential-shaped values are masked from the code context before any prompt
+  is sent to a provider.
+- `--osv` is the only analysis stage that reaches the network, and it is
+  opt-in; without it the tool stays offline.
 - Symlinks in decompiled trees are never followed.
 
 See [SECURITY.md](SECURITY.md) for the full threat model.

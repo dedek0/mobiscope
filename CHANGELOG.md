@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- In-process Android analyzers: `elf` (native-library hardening, JNI
+  exports, anti-analysis strings), `anti-analysis` (obfuscation plus
+  root/emulator/anti-debug/instrumentation markers), `repack` (debug or
+  unexpected certificate, extra DEX files, payloads hidden in assets,
+  uniform ZIP timestamps) and `sdk` (third-party library inventory). They run
+  directly on the APK, without a decompiler.
+- `analyze --expect-cert <hex>` flags a signing certificate that does not
+  match the expected fingerprint.
+- `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the
+  only network egress during analysis) and `analyze --sbom` writes a
+  CycloneDX 1.5 `sbom.cdx.json`.
+- Semgrep rule packs are embedded in the binary (`internal/rules`), so an
+  installed build no longer depends on the working directory; the Android
+  pack now carries 29 rules.
+- LLM prompts are redacted for credential-shaped values before leaving the
+  machine; retries honour `Retry-After`; `llm.cache_ttl_hours` sets the cache
+  TTL.
+- Tests for `internal/osv`, `internal/sbom` and the embedded rule packs.
 - Platform detection (`internal/platform`) for Android APK and iOS IPA from
   the ZIP central directory; the detected platform is recorded on the session
   and in the report.
@@ -71,6 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Semgrep rule packs moved from `rules/` to `internal/rules/` and are
+  embedded in the binary, then materialized to a process-owned temp
+  directory for semgrep.
+- Independent in-process stages run concurrently with the decompilers, and a
+  tool failure marks the session `partial` instead of dropping the run.
 - **Finding ID encoding** now NUL-delimits fields (`GenerateID`). IDs produced
   by earlier builds will not reproduce; determinism holds from this release
   forward.
@@ -112,8 +135,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsupported `objc` language, every `pattern-regex: |` block scalar carried a
   trailing newline that killed all matches, and `mastg-ecb-mode` ANDed two
   mutually exclusive regexes. Packs validated end-to-end under
-  `semgrep/semgrep:1.127.1` (all 18 Android rules fire) and guarded by
+  `semgrep/semgrep:1.127.1` (all 29 Android rules fire) and guarded by
   `TestRulePacks_SemgrepSchema`.
+- `rules.Cleanup` now removes the materialized pack directory and resets the
+  one-shot state, so a later `Materialize` does not return a stale path.
+
+### Security
+
+- Bumped `github.com/go-chi/chi/v5` to 5.4.0, fixing client IP spoofing via
+  `X-Forwarded-For` (Dependabot alert #1).
 
 ## [0.0.1] - 2026-09-22
 

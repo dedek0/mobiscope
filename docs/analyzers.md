@@ -14,6 +14,7 @@ and they do **not** all use the same rule:
 | Stage | Default (no `--stages`)? | Rule |
 |-------|--------------------------|------|
 | `apktool`, `jadx` (Android) | yes | `want()` — runs by default or when named |
+| `elf`, `anti-analysis`, `repack`, `sdk` (Android) | yes | `stageEnabled()` — runs by default or when named (in-process) |
 | `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`, `strings` (iOS) | yes | `want()` — runs by default or when named |
 | `gitleaks`, `semgrep` (both platforms) | **no** | `stageSet[...]` — **only when explicitly named** |
 | `inventory` | yes | Pipeline phase 3: runs when `--stages` is empty *or* contains `inventory` |
@@ -21,7 +22,8 @@ and they do **not** all use the same rule:
 
 Consequences of that split:
 
-- `analyze app.apk` runs `apktool + jadx + inventory` (+ implicit apksigner).
+- `analyze app.apk` runs `apktool + jadx + elf + anti-analysis + repack + sdk
+  + inventory` (+ implicit apksigner).
 - `analyze app.apk --stages apktool,jadx,gitleaks,semgrep` adds the scanners.
 - `analyze app.apk --stages inventory` runs only the in-process inventory
   phase (no external binary).
@@ -71,8 +73,12 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 |-------|-------|---------|-----------|--------------|-----------|
 | `apktool` | `apktool d -f -o <dir> [-r] -- <apk>` | 10 min | `apktool/` (decoded `AndroidManifest.xml`, `res/`, `apktool.yml`) | none directly — feeds inventory | default, fail-soft |
 | `jadx` | `jadx --threads-count N -d <dir> [--no-res] -- <apk>` | 15 min | `jadx/` (sources + manifest) | none directly — feeds gitleaks/semgrep/inventory/triage context | default, fail-soft |
+| `elf` | in-process (no binary) | none | fills `inventory.json.native_libs` | `binary_hardening`, `native_code`, `obfuscation` | default |
+| `anti-analysis` | in-process (no binary) | none | — | `anti_analysis`, `obfuscation` | default |
+| `repack` | in-process (no binary) | none | — | `manifest_issue` (repackaging) | default |
+| `sdk` | in-process (no binary) | none | fills `inventory.json.sdks` | informational `manifest_issue` per library | default |
 | `gitleaks` | `gitleaks detect --source <dir> --report-format json --report-path <session>/gitleaks-report.json --no-git` | 10 min | `gitleaks-report.json` | `secret` | opt-in stage |
-| `semgrep` | `semgrep --config rules/mastg --sarif --output <session>/semgrep.sarif --quiet <dir>` | 15 min | `semgrep.sarif` | `code_pattern`, `secret`, `manifest_issue`, `network_config`, `pinning_indicator` | opt-in stage |
+| `semgrep` | `semgrep --config <materialized embedded pack> --sarif --output <session>/semgrep.sarif --quiet <dir>` | 15 min | `semgrep.sarif` | `code_pattern`, `secret`, `manifest_issue`, `network_config`, `pinning_indicator` | opt-in stage |
 | `inventory` | in-process (no binary) | none | — (plus shared `inventory.json`) | `manifest_issue`, `network_config`, `pinning_indicator`, `secret`, `code_pattern` | default |
 | `apksigner` | `apksigner verify --print-certs --verbose <apk>` | 2 min | — (fills `session.signing_cert_fp`, `signature_scheme`) | none wired (see below) | implicit, fail-soft |
 
@@ -89,21 +95,37 @@ Details and known gaps:
   for every scanner below; they resolve `analyzers.SourceRoot`
   (`jadx/` → `apktool/` → session root), so an apktool-only run still gets
   scanned.
+- **elf** — reads native libraries straight from the APK (`lib/<abi>/*.so`)
+  and records PIE, RELRO, NX, stack canary, FORTIFY, stripping, text
+  relocations, RPATH and `Java_*` JNI exports in `inventory.json.native_libs`.
+  It also surfaces the anti-analysis strings found in the binary.
+- **anti-analysis** — parses the DEX class names to score obfuscation and
+  scans strings for root/emulator, anti-debug, instrumentation (Frida/Xposed)
+  and dynamic-code-loading markers. Emits `anti_analysis` and `obfuscation`
+  findings.
+- **repack** — flags a debug certificate, a certificate that does not match
+  `--expect-cert`, additional `classes*.dex` files, payloads hidden in
+  `assets/` and a uniform ZIP timestamp. Findings are `manifest_issue`.
+- **sdk** — recognises third-party libraries from DEX class prefixes and
+  recovers versions from decoded resources. Feeds `inventory.json.sdks`,
+  which is what `--osv` looks up.
 - **gitleaks** — exit `0` (clean) and `1` (leaks found) are success;
   `>= 2` fails the stage (ADR-005; `--exit-code` is not overridden).
   The report *file* is preferred over stdout (stdout carries banners);
   `extractJSONArray` trims any remaining preamble. Severity comes from the
   rule's tags (untagged defaults to `critical`), confidence from entropy.
   Findings are marked `needs_llm_triage` + `representative`.
-- **semgrep** — rules from `rules/mastg/rules.yaml` (18 rules); severity is the SARIF
+- **semgrep** — rules from the embedded pack (`internal/rules/mastg/rules.yaml`,
+  29 rules); severity is the SARIF
   level (`error->critical`, `warning->medium`, `note/info->info`, else
   `low`), category from rule metadata with rule-id heuristics as fallback,
   confidence fixed `0.8`; `masvs`/`mastg`/`cwe` are read from the SARIF
   rule `properties`. Any non-zero exit fails the stage. Both packs use the
   top-level `rules:` wrapper (bare rule lists are rejected by semgrep
   1.127.1 with `was not a mapping`) and are guarded by
-  `TestRulePacks_SemgrepSchema`. Validate manually with
-  `semgrep --validate --config rules/mastg`.
+  `TestRulePacks_SemgrepSchema`. The packs are embedded in the binary and
+  materialized to a temp directory for semgrep; validate manually with
+  `semgrep --validate --config internal/rules/mastg/rules.yaml`.
 - **inventory** — reads `jadx/AndroidManifest.xml`, falling back to
   `apktool/AndroidManifest.xml` and then the session root,
   decodes it with `encoding/xml` (legacy regex fallback for non-XML),
@@ -135,7 +157,7 @@ Details and known gaps:
 | `classdump` | in-process symbol regexes (not `class-dump(1)`) | none | — | `code_pattern`, `privacy`, `obfuscation` | default |
 | `strings` | in-process printable-string extraction | none | — | `secret`, `code_pattern`, `pinning_indicator` (shared `scanRules`) | default |
 | `gitleaks` | as Android | 10 min | `gitleaks-report.json` | `secret` | opt-in |
-| `semgrep` | `semgrep --config rules/mastg-ios …` | 15 min | `semgrep.sarif` | as Android | opt-in |
+| `semgrep` | `semgrep --config <materialized embedded iOS pack> …` | 15 min | `semgrep.sarif` | as Android | opt-in |
 | `inventory-ios` | in-process (reuses plist/codesign/macho converters) | none | — | same as those stages + `obfuscation` (duplicates collapsed by dedup) | default via `inventory` |
 
 iOS semgrep gap: semgrep has **no Objective-C parser** (`objc` is not a
