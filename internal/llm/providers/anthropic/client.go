@@ -22,8 +22,11 @@ import (
 const (
 	defaultBaseURL = "https://api.anthropic.com"
 	messagesPath   = "/v1/messages"
+	modelsPath     = "/v1/models"
 	apiVersion     = "2023-06-01"
 	defaultTimeout = 60 * time.Second
+	// maxErrorBodyBytes caps how much of an error response is read.
+	maxErrorBodyBytes = 64 << 10
 )
 
 // Provider implements [llmtypes.Provider] for Anthropic Claude.
@@ -73,19 +76,28 @@ func (p *Provider) Capabilities() llmtypes.Capabilities {
 	}
 }
 
-// IsAvailable performs a lightweight health check by sending a minimal request.
+// IsAvailable checks whether the provider is reachable.
+//
+// The check uses the free models endpoint. It used to send a real chat
+// request, which made every routing decision a billable call.
 func (p *Provider) IsAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	req := messagesRequest{
-		Model:     "claude-sonnet-4-20250514",
-		MaxTokens: 1,
-		Messages:  []message{{Role: "user", Content: "hi"}},
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+modelsPath, nil)
+	if err != nil {
+		return false
 	}
+	p.setHeaders(req)
 
-	_, err := p.doChat(ctx, req)
-	return err == nil
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+
+	return resp.StatusCode == http.StatusOK
 }
 
 // Models returns the known Claude model list (Anthropic has no /v1/models endpoint).
@@ -378,7 +390,7 @@ func (p *Provider) setHeaders(req *http.Request) {
 }
 
 func (p *Provider) mapError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 
 	var errResp errorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
@@ -386,8 +398,7 @@ func (p *Provider) mapError(resp *http.Response) error {
 		case http.StatusUnauthorized:
 			return fmt.Errorf("%w: %s", llmtypes.ErrAuthFailed, errResp.Error.Message)
 		case http.StatusTooManyRequests:
-			retryAfter := resp.Header.Get("Retry-After")
-			return fmt.Errorf("%w (retry-after %s): %s", llmtypes.ErrRateLimited, retryAfter, errResp.Error.Message)
+			return llmtypes.RateLimited(resp.Header.Get("Retry-After"), errResp.Error.Message)
 		case http.StatusNotFound:
 			return fmt.Errorf("%w: %s", llmtypes.ErrModelNotFound, errResp.Error.Message)
 		default:
@@ -399,7 +410,7 @@ func (p *Provider) mapError(resp *http.Response) error {
 	case http.StatusUnauthorized:
 		return fmt.Errorf("%w: status %d", llmtypes.ErrAuthFailed, resp.StatusCode)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("%w: status %d", llmtypes.ErrRateLimited, resp.StatusCode)
+		return llmtypes.RateLimited(resp.Header.Get("Retry-After"), "")
 	default:
 		return fmt.Errorf("anthropic API error: status %d: %s", resp.StatusCode, string(body))
 	}

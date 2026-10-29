@@ -23,6 +23,9 @@ import (
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
 )
 
+// defaultTimeout bounds a request when the caller did not supply a client.
+const defaultTimeout = 60 * time.Second
+
 // Provider implements [llmtypes.Provider] for OpenAI-compatible APIs.
 type Provider struct {
 	name       string
@@ -80,6 +83,10 @@ func New(cfg Config) *Provider {
 	clientCfg.BaseURL = cfg.BaseURL
 	if cfg.HTTPClient != nil {
 		clientCfg.HTTPClient = cfg.HTTPClient
+	} else {
+		// The default client has no timeout, so an unresponsive endpoint
+		// hangs the caller forever.
+		clientCfg.HTTPClient = &http.Client{Timeout: defaultTimeout}
 	}
 
 	return &Provider{

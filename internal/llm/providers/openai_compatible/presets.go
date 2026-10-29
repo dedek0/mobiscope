@@ -1,6 +1,7 @@
 package openaicompatible
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
@@ -134,11 +135,39 @@ func ResolvePreset(name, baseURL string) *Preset {
 	return nil
 }
 
-// IsLocalURL returns true if the URL points to localhost.
-func IsLocalURL(url string) bool {
-	return strings.Contains(url, "localhost") ||
-		strings.Contains(url, "127.0.0.1") ||
-		strings.Contains(url, "0.0.0.0")
+// IsLocalURL reports whether the URL points at the local machine.
+//
+// The hostname is compared exactly: a substring test classified
+// "https://localhost.evil.example" and "https://evil.example/?x=127.0.0.1"
+// as local, which let a crafted base_url bypass the cloud policy and ship
+// secrets to a remote host.
+func IsLocalURL(rawURL string) bool {
+	host := URLHost(rawURL)
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]":
+		return true
+	}
+	// 127.0.0.0/8 is entirely loopback.
+	if strings.HasPrefix(host, "127.") {
+		return true
+	}
+	return false
+}
+
+// URLHost returns the hostname of a URL, or "" when it cannot be parsed.
+func URLHost(rawURL string) string {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // KindFromURL returns KindLocal or KindCloud based on the URL.

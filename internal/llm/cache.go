@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/metrics"
@@ -37,9 +38,16 @@ func NewCacheInDir(dir string, ttl time.Duration) *Cache {
 }
 
 // CacheKey computes the SHA256 cache key from provider, model, prompt, and temperature.
+//
+// The fields are length-prefixed before hashing: a plain "|" join made
+// ("a|b", "c") and ("a", "b|c") collide, so a cached answer could be served
+// for a different provider or model.
 func CacheKey(provider, model, prompt string, temperature float64) string {
-	input := fmt.Sprintf("%s|%s|%.4f|%s", provider, model, temperature, prompt)
-	h := sha256.Sum256([]byte(input))
+	var b strings.Builder
+	for _, field := range []string{provider, model, fmt.Sprintf("%.4f", temperature), prompt} {
+		fmt.Fprintf(&b, "%d:%s|", len(field), field)
+	}
+	h := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(h[:16])
 }
 
@@ -53,7 +61,7 @@ func (c *Cache) Get(key string) *json.RawMessage {
 	}
 
 	if c.ttl > 0 && time.Since(info.ModTime()) > c.ttl {
-		os.Remove(path)
+		_ = os.Remove(path)
 		metrics.RecordCacheLookup(false)
 		return nil
 	}
@@ -63,8 +71,7 @@ func (c *Cache) Get(key string) *json.RawMessage {
 		metrics.RecordCacheLookup(false)
 		return nil
 	}
-	if len(data) == 0 || !json.Valid(data) {
-		// Corrupt entry: treat as a miss so callers recompute.
+	if len(data) == 0 {
 		metrics.RecordCacheLookup(false)
 		return nil
 	}
@@ -74,13 +81,15 @@ func (c *Cache) Get(key string) *json.RawMessage {
 	return &raw
 }
 
-// Set stores a raw JSON response in the cache. The value must be valid JSON;
-// non-JSON payloads are rejected so callers cannot poison the cache. The
-// write is atomic (temp file + rename) so concurrent Get callers never see a
-// truncated file.
+// Set stores a response in the cache.
+//
+// The payload may be a JSON document or a plain-text answer: providers
+// without JSON mode reply with a fenced block, and rejecting it left the
+// cache empty for every one of them. The write is atomic (temp file +
+// rename) so concurrent Get callers never see a truncated file.
 func (c *Cache) Set(key string, value json.RawMessage) error {
-	if len(value) == 0 || !json.Valid(value) {
-		return fmt.Errorf("cache value is not valid JSON")
+	if len(value) == 0 {
+		return fmt.Errorf("cache value is empty")
 	}
 	path := filepath.Join(c.dir, key+".json")
 	tmp, err := os.CreateTemp(c.dir, key+".tmp-*")
@@ -93,11 +102,11 @@ func (c *Cache) Set(key string, value json.RawMessage) error {
 		werr = cerr
 	}
 	if werr != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("writing cache entry: %w", werr)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("committing cache entry: %w", err)
 	}
 	return nil

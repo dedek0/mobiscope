@@ -52,15 +52,21 @@ type LLMConfig struct {
 	// RetryBaseDelayMS is the base backoff delay in milliseconds.
 	RetryBaseDelayMS int `koanf:"retry_base_delay_ms" validate:"omitempty,gt=0"`
 	// TimeoutSeconds caps a single LLM call.
-	TimeoutSeconds int             `koanf:"timeout_seconds" validate:"omitempty,gt=0"`
-	Tasks          map[string]Task `koanf:"tasks" validate:"dive"`
-	Providers      ProvidersConfig `koanf:"providers" validate:"required,dive,required"`
+	TimeoutSeconds int `koanf:"timeout_seconds" validate:"omitempty,gt=0"`
+	// CacheTTLHours is how long a cached LLM answer stays valid. Zero
+	// means the built-in default (one week).
+	CacheTTLHours int             `koanf:"cache_ttl_hours" validate:"omitempty,gte=0,lte=8760"`
+	Tasks         map[string]Task `koanf:"tasks" validate:"dive"`
+	Providers     ProvidersConfig `koanf:"providers" validate:"required,dive,required"`
 }
 
 // Task defines which provider/model to use for a specific task type.
+//
+// The model is optional: when it is empty the router picks the model that
+// fits the provider.
 type Task struct {
 	Provider string `koanf:"provider" validate:"required"`
-	Model    string `koanf:"model"    validate:"required"`
+	Model    string `koanf:"model"    validate:"omitempty"`
 }
 
 // ProvidersConfig holds configuration for every configured LLM provider,
@@ -263,7 +269,7 @@ func loadFlags(k *koanf.Koanf, flags *pflag.FlagSet) error {
 // overwrites a value that is already set.
 func applyDefaults(cfg *Config) {
 	if cfg.LLM.DefaultProvider == "" {
-		cfg.LLM.DefaultProvider = "ollama"
+		cfg.LLM.DefaultProvider = defaultProviderName
 	}
 
 	if cfg.LLM.Providers == nil {
@@ -275,13 +281,22 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 
+	// The task defaults are bound to the default provider. When that
+	// provider is not the built-in one, the task carries no model: the
+	// router then picks the model that fits the provider instead of
+	// forcing the ollama model onto a cloud provider.
 	if cfg.LLM.Tasks == nil {
 		cfg.LLM.Tasks = map[string]Task{}
 	}
 	for name, def := range defaultTasks() {
-		if _, ok := cfg.LLM.Tasks[name]; !ok {
-			cfg.LLM.Tasks[name] = def
+		if _, ok := cfg.LLM.Tasks[name]; ok {
+			continue
 		}
+		if cfg.LLM.DefaultProvider != defaultProviderName {
+			cfg.LLM.Tasks[name] = Task{Provider: cfg.LLM.DefaultProvider}
+			continue
+		}
+		cfg.LLM.Tasks[name] = def
 	}
 
 	if cfg.LLM.MaxRetries == 0 {
@@ -293,14 +308,21 @@ func applyDefaults(cfg *Config) {
 	if cfg.LLM.TimeoutSeconds == 0 {
 		cfg.LLM.TimeoutSeconds = 60
 	}
+	if cfg.LLM.CacheTTLHours == 0 {
+		cfg.LLM.CacheTTLHours = 168
+	}
 
 	if cfg.Pipeline.MaxConcurrency == 0 {
 		cfg.Pipeline.MaxConcurrency = 4
 	}
 }
 
+// defaultProviderName is the provider used when the operator did not name
+// one.
+const defaultProviderName = "ollama"
+
 func defaultTasks() map[string]Task {
-	def := Task{Provider: "ollama", Model: "qwen2.5-coder:7b"}
+	def := Task{Provider: defaultProviderName, Model: "qwen2.5-coder:7b"}
 	return map[string]Task{
 		"triage":      def,
 		"remediation": def,

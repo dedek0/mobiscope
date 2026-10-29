@@ -81,12 +81,39 @@ var extractJSONLooseRe = regexp.MustCompile(`(?s)\{[^{}]*"verdict"[^{}]*\}`)
 // Triage processes a batch of findings, enriching each with LLM verdicts.
 // Only findings with NeedsLLMTriage=true are processed.
 //
+// The route is resolved once per batch instead of once per finding: the
+// provider availability check is a real request for some providers, and
+// calling it per finding turned a batch into N extra billable calls.
+//
 // Per-finding failures mark the finding inconclusive but do not abort the
 // batch. Policy violations (cloud blocked, provider unavailable) are
 // accumulated and returned so callers can map them to exit code 4.
 func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, codeContext map[string]string) (int, error) {
 	processed := 0
 	var policyErr error
+
+	// At most two routes: one for findings without secrets and one for
+	// findings that carry them, because the privacy policy differs. Each
+	// is resolved lazily, so a batch without secrets never pays for the
+	// secret route.
+	var plainRoute, secretRoute *RouteResult
+	var plainErr, secretErr error
+	plainDone, secretDone := false, false
+
+	routeFor := func(containsSecret bool) (*RouteResult, error) {
+		if containsSecret {
+			if !secretDone {
+				secretDone = true
+				secretRoute, secretErr = te.router.Route(ctx, llmtypes.TaskTriage, true)
+			}
+			return secretRoute, secretErr
+		}
+		if !plainDone {
+			plainDone = true
+			plainRoute, plainErr = te.router.Route(ctx, llmtypes.TaskTriage, false)
+		}
+		return plainRoute, plainErr
+	}
 
 	for i := range findings {
 		if !findings[i].NeedsLLMTriage {
@@ -97,8 +124,8 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 			return processed, fmt.Errorf("triage cancelled: %w", err)
 		}
 
-		containsSecret := findings[i].Category == models.CategorySecret
-		route, err := te.router.Route(ctx, llmtypes.TaskTriage, containsSecret)
+		containsSecret := findingCarriesSecret(findings[i])
+		route, err := routeFor(containsSecret)
 		if err != nil {
 			te.logger.Error("routing failed for finding", "id", findings[i].ID, "error", err)
 			if errors.Is(err, ErrCloudNotAllowed) || errors.Is(err, ErrProviderUnavailable) {
@@ -134,11 +161,28 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 	return processed, policyErr
 }
 
+// findingCarriesSecret reports whether a finding must be kept away from a
+// cloud provider. The category is not enough: an analyzer can mark a
+// finding as sensitive without putting it in the secret category.
+func findingCarriesSecret(f models.Finding) bool {
+	return f.Category == models.CategorySecret || f.Sensitivity == models.SensitivitySecret
+}
+
 func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route *RouteResult, codeContext map[string]string) error {
+	// The code context is looked up with the same key the pipeline used to
+	// build it, and the excerpt is centred on the offending line so the
+	// model actually sees the finding.
 	code := codeContext[f.Location.File]
 	if code == "" {
 		code = f.Location.Snippet
+	} else if excerpt := ExtractCodeContext(code, f.Location.Line, triageContextLines); excerpt != "" {
+		code = excerpt
 	}
+
+	// Anything that looks like a credential is redacted before the
+	// context leaves the machine: the excerpt can contain a second
+	// secret that has nothing to do with the finding.
+	code = RedactSecrets(code)
 
 	truncated, wasTruncated := TruncateContext(code, te.cfg.MaxContextChars)
 	if wasTruncated {
@@ -175,7 +219,7 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 		}
 	}
 
-	// Call LLM with retry + per-call timeout.
+	// Call LLM with retry + a per-attempt timeout.
 	req := llmtypes.ChatRequest{
 		Model: route.Model,
 		Messages: []llmtypes.Message{
@@ -185,13 +229,16 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 	}
 
 	var resp *llmtypes.ChatResponse
-	callCtx, cancel := context.WithTimeout(ctx, te.timeout)
-	err = withRetry(callCtx, te.retry, te.logger, "triage", func() error {
+	// The deadline is applied per attempt, not to the whole retry
+	// sequence: otherwise the first slow attempt consumes the entire
+	// budget and the retries never happen.
+	err = withRetry(ctx, te.retry, te.logger, "triage", func() error {
+		attemptCtx, cancel := context.WithTimeout(ctx, te.timeout)
+		defer cancel()
 		var callErr error
-		resp, callErr = route.Provider.Chat(callCtx, req)
+		resp, callErr = route.Provider.Chat(attemptCtx, req)
 		return callErr
 	})
-	cancel()
 	if err != nil {
 		metrics.RecordLLMCall(route.Provider.Name(), false, 0)
 		return fmt.Errorf("chat failed: %w", err)
@@ -202,7 +249,8 @@ func (te *TriageEngine) triageOne(ctx context.Context, f *models.Finding, route 
 
 	raw := json.RawMessage([]byte(resp.Content))
 
-	// Cache the raw JSON response.
+	// Cache the raw response. Providers without JSON mode answer with a
+	// fenced block, so the payload is stored as text and parsed on read.
 	if te.cache != nil {
 		if err := te.cache.Set(cacheKey, raw); err != nil {
 			te.logger.Warn("cache write failed", "error", err)
@@ -219,10 +267,10 @@ func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw
 		triageResp, err = extractJSONFromText(string(raw))
 		if err != nil {
 			te.logger.Warn("failed to parse triage response, marking inconclusive",
-				"finding", f.ID, "raw", string(raw)[:min(len(string(raw)), 200)])
+				"finding", f.ID, "raw", truncateForLog(string(raw)))
 			f.LLMVerdict = models.VerdictInconclusive
 			f.LLMExplanation = "failed to parse LLM response"
-			f.LLMRawResponse = string(raw)
+			f.LLMRawResponse = RedactSecrets(string(raw))
 			f.LLMProvider = route.Provider.Name()
 			f.LLMModel = route.Model
 			return nil
@@ -231,7 +279,9 @@ func (te *TriageEngine) applyResponse(f *models.Finding, route *RouteResult, raw
 
 	f.LLMProvider = route.Provider.Name()
 	f.LLMModel = route.Model
-	f.LLMRawResponse = string(raw)
+	// The raw answer often echoes the evidence, and the evidence can hold
+	// a credential. The stored copy is redacted.
+	f.LLMRawResponse = RedactSecrets(string(raw))
 
 	switch triageResp.Verdict {
 	case "confirmed":
@@ -288,4 +338,13 @@ func ExtractCodeContext(source string, line, contextLines int) string {
 	}
 
 	return strings.Join(lines[start:end], "\n")
+}
+
+// truncateForLog trims a value so it can be written to a log line.
+func truncateForLog(s string) string {
+	const max = 200
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }

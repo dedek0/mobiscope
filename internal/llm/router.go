@@ -49,7 +49,13 @@ func (r *Router) Route(ctx context.Context, task llmtypes.TaskType, containsSecr
 
 	// 1. Try explicit task config.
 	if taskCfg, ok := r.cfg.Tasks[string(task)]; ok {
-		result, err := r.tryProvider(ctx, taskCfg.Provider, taskCfg.Model, string(task), containsSecret)
+		model := taskCfg.Model
+		if model == "" {
+			// The task names a provider but no model: pick the one that
+			// fits that provider.
+			model = r.defaultModel(taskCfg.Provider)
+		}
+		result, err := r.tryProvider(ctx, taskCfg.Provider, model, string(task), containsSecret)
 		if err == nil {
 			return result, nil
 		}
@@ -156,8 +162,12 @@ func (r *Router) sortedProviderNames() []string {
 	return names
 }
 
+// defaultModel returns the model to use for a provider.
+//
+// The model of the task that is being routed wins; a task bound to another
+// provider must not lend its model to this one.
 func (r *Router) defaultModel(providerName string) string {
-	if taskCfg, ok := r.cfg.Tasks["triage"]; ok && taskCfg.Provider == providerName {
+	if taskCfg, ok := r.cfg.Tasks["triage"]; ok && taskCfg.Provider == providerName && taskCfg.Model != "" {
 		return taskCfg.Model
 	}
 	// Deterministic order so runs are reproducible across map iterations.
@@ -167,7 +177,7 @@ func (r *Router) defaultModel(providerName string) string {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if r.cfg.Tasks[name].Provider == providerName {
+		if r.cfg.Tasks[name].Provider == providerName && r.cfg.Tasks[name].Model != "" {
 			return r.cfg.Tasks[name].Model
 		}
 	}

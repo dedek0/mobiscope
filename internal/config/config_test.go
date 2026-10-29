@@ -56,10 +56,12 @@ timeout = 45
 	assert.Equal(t, "ANTHROPIC_API_KEY", cfg.LLM.Providers["anthropic"].APIKeyEnv)
 	assert.Equal(t, 45, cfg.LLM.Providers["anthropic"].Timeout)
 
-	// Defaults fill the rest of the tasks and the ollama provider.
+	// Defaults fill the rest of the tasks and the ollama provider. The
+	// tasks follow the default provider, without the ollama model.
 	require.NotNil(t, cfg.LLM.Providers["ollama"])
 	assert.Equal(t, "anthropic", cfg.LLM.Tasks["triage"].Provider)
-	assert.Equal(t, "ollama", cfg.LLM.Tasks["chat"].Provider)
+	assert.Equal(t, "anthropic", cfg.LLM.Tasks["chat"].Provider)
+	assert.Empty(t, cfg.LLM.Tasks["chat"].Model)
 }
 
 func TestLoadFromTOML_PartialTasksKeepDefaults(t *testing.T) {
@@ -269,8 +271,11 @@ api_key_env = "ANTHROPIC_API_KEY"
 	assert.Equal(t, "anthropic", cfg.LLM.DefaultProvider)
 	assert.Equal(t, "env-model", cfg.LLM.Tasks["triage"].Model)
 	assert.Equal(t, "ollama", cfg.LLM.Tasks["triage"].Provider)
-	// untouched by file/env/flags
-	assert.Equal(t, "qwen2.5-coder:7b", cfg.LLM.Tasks["chat"].Model)
+	// The chat task is untouched by file/env/flags, so it follows the
+	// default provider. It carries no model: the router picks the one
+	// that fits the provider.
+	assert.Equal(t, "anthropic", cfg.LLM.Tasks["chat"].Provider)
+	assert.Empty(t, cfg.LLM.Tasks["chat"].Model)
 }
 
 func TestLoad_EnvConfigPath(t *testing.T) {
@@ -411,7 +416,7 @@ model = "x"
 	assert.Contains(t, err.Error(), "default_provider")
 }
 
-func TestLoad_MissingTaskFields(t *testing.T) {
+func TestLoad_TaskWithoutProviderIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	content := `
@@ -419,7 +424,7 @@ func TestLoad_MissingTaskFields(t *testing.T) {
 default_provider = "ollama"
 
 [llm.tasks.triage]
-provider = "ollama"
+model = "llama3:8b"
 `
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 

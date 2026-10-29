@@ -3,7 +3,9 @@ package llm
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/dedek0/mobiscope/internal/config"
 	"github.com/dedek0/mobiscope/internal/llm/providers/anthropic"
@@ -29,25 +31,46 @@ func (f *Factory) Create(name string, cfg *config.ProviderConfig) (Provider, err
 		return nil, fmt.Errorf("provider config for %s is nil", name)
 	}
 
+	// The config struct is shared with the caller (and reachable from the
+	// API server), so it is copied before it is modified.
+	local := *cfg
+	cfg = &local
+
 	// Determine the effective type: explicit type field, or infer from name.
 	effectiveType := cfg.Type
 	if effectiveType == "" {
 		effectiveType = name
 	}
 
+	// The configured timeout is applied to every provider that has a
+	// client, so the value is not silently ignored.
+	var httpClient *http.Client
+	if cfg.Timeout > 0 {
+		httpClient = &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second}
+	}
+
 	switch effectiveType {
 	case NameOllama:
+		if httpClient != nil {
+			return ollama.NewWithHTTPClient(cfg.BaseURL, httpClient, f.logger), nil
+		}
 		return ollama.New(cfg.BaseURL, f.logger), nil
 
 	case NameOpenAI, "openai_compatible":
-		return f.createOpenAICompatible(name, cfg)
+		return f.createOpenAICompatible(name, cfg, httpClient)
 
 	case NameAnthropic:
 		apiKey := resolveAPIKey(cfg)
+		if httpClient != nil {
+			return anthropic.NewWithHTTPClient(cfg.BaseURL, apiKey, httpClient, f.logger), nil
+		}
 		return anthropic.New(cfg.BaseURL, apiKey, f.logger), nil
 
 	case NameGemini:
 		apiKey := resolveAPIKey(cfg)
+		if httpClient != nil {
+			return gemini.NewWithHTTPClient(cfg.BaseURL, apiKey, httpClient, f.logger), nil
+		}
 		return gemini.New(apiKey, f.logger), nil
 
 	default:
@@ -55,19 +78,19 @@ func (f *Factory) Create(name string, cfg *config.ProviderConfig) (Provider, err
 		if _, ok := openaicompatible.Presets[effectiveType]; ok {
 			cfg.Type = "openai_compatible"
 			cfg.Preset = effectiveType
-			return f.createOpenAICompatible(name, cfg)
+			return f.createOpenAICompatible(name, cfg, httpClient)
 		}
 		return nil, fmt.Errorf("unknown provider type %q (available presets: openai, llamacpp, lmstudio, vllm, localai, openrouter, groq, together, azure, fireworks, deepinfra, perplexity)", effectiveType)
 	}
 }
 
-func (f *Factory) createOpenAICompatible(name string, cfg *config.ProviderConfig) (Provider, error) {
+func (f *Factory) createOpenAICompatible(name string, cfg *config.ProviderConfig, httpClient *http.Client) (Provider, error) {
 	apiKey := resolveAPIKey(cfg)
 
 	// If a preset is specified, use it.
 	if cfg.Preset != "" {
 		overrides := &openaicompatible.Config{
-			HTTPClient: nil,
+			HTTPClient: httpClient,
 		}
 		if cfg.BaseURL != "" {
 			overrides.BaseURL = cfg.BaseURL
@@ -85,10 +108,11 @@ func (f *Factory) createOpenAICompatible(name string, cfg *config.ProviderConfig
 	}
 
 	return openaicompatible.New(openaicompatible.Config{
-		Name:    name,
-		BaseURL: cfg.BaseURL,
-		APIKey:  apiKey,
-		Logger:  f.logger,
+		Name:       name,
+		BaseURL:    cfg.BaseURL,
+		APIKey:     apiKey,
+		HTTPClient: httpClient,
+		Logger:     f.logger,
 	}), nil
 }
 

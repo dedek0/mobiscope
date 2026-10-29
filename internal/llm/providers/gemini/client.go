@@ -19,6 +19,9 @@ import (
 )
 
 const (
+	// maxErrorBodyBytes caps how much of an error response is read.
+	maxErrorBodyBytes = 64 << 10
+
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultTimeout = 60 * time.Second
 )
@@ -389,7 +392,7 @@ func (p *Provider) generateURL(model string, stream bool) string {
 }
 
 func (p *Provider) mapError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 
 	var errResp apiError
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
@@ -397,8 +400,7 @@ func (p *Provider) mapError(resp *http.Response) error {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return fmt.Errorf("%w: %s", llmtypes.ErrAuthFailed, errResp.Error.Message)
 		case http.StatusTooManyRequests:
-			retryAfter := resp.Header.Get("Retry-After")
-			return fmt.Errorf("%w (retry-after %s): %s", llmtypes.ErrRateLimited, retryAfter, errResp.Error.Message)
+			return llmtypes.RateLimited(resp.Header.Get("Retry-After"), errResp.Error.Message)
 		case http.StatusNotFound:
 			return fmt.Errorf("%w: %s", llmtypes.ErrModelNotFound, errResp.Error.Message)
 		default:
@@ -410,7 +412,7 @@ func (p *Provider) mapError(resp *http.Response) error {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return fmt.Errorf("%w: status %d", llmtypes.ErrAuthFailed, resp.StatusCode)
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("%w: status %d", llmtypes.ErrRateLimited, resp.StatusCode)
+		return llmtypes.RateLimited(resp.Header.Get("Retry-After"), fmt.Sprintf("status %d", resp.StatusCode))
 	default:
 		return fmt.Errorf("gemini API error: status %d: %s", resp.StatusCode, string(body))
 	}

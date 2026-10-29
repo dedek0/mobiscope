@@ -39,17 +39,30 @@ func TestCache_SetAndGet(t *testing.T) {
 	assert.Contains(t, string(*raw), "response")
 }
 
-func TestCache_SetRejectsInvalidJSON(t *testing.T) {
+func TestCache_SetAcceptsPlainText(t *testing.T) {
 	dir := t.TempDir()
 	cache := NewCacheInDir(dir, time.Hour)
 
-	err := cache.Set("k", json.RawMessage(`not json`))
-	require.Error(t, err)
+	// Providers without JSON mode answer with a fenced text block; the
+	// cache must store it, otherwise it stays empty for every one of them.
+	err := cache.Set("k", json.RawMessage("```json\n{\"verdict\":\"confirmed\"}\n```"))
+	require.NoError(t, err)
 
-	err = cache.Set("k", json.RawMessage(``))
-	require.Error(t, err)
+	raw := cache.Get("k")
+	require.NotNil(t, raw)
+	assert.Contains(t, string(*raw), "confirmed")
 
-	assert.Nil(t, cache.Get("k"))
+	// An empty payload is still rejected.
+	err = cache.Set("k2", json.RawMessage(``))
+	require.Error(t, err)
+	assert.Nil(t, cache.Get("k2"))
+}
+
+func TestCacheKey_FieldsCannotCollide(t *testing.T) {
+	// A plain "|" join made these two keys identical.
+	a := CacheKey("a|b", "c", "prompt", 0)
+	b := CacheKey("a", "b|c", "prompt", 0)
+	assert.NotEqual(t, a, b)
 }
 
 func TestCache_Miss(t *testing.T) {

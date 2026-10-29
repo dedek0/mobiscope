@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
+	"net"
+	"os"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
@@ -31,9 +34,11 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 // RateLimitError is implemented by errors that carry a server-suggested wait.
-type RateLimitError interface {
-	error
-	RetryAfter() time.Duration
+type RateLimitError = llmtypes.RateLimitError
+
+// WithRetryAfter attaches a server-suggested wait to an error.
+func WithRetryAfter(err error, wait time.Duration) error {
+	return llmtypes.WithRetryAfter(err, wait)
 }
 
 // isRetryable reports whether an LLM error is worth retrying: rate limits,
@@ -52,8 +57,28 @@ func isRetryable(err error) bool {
 		errors.Is(err, llmtypes.ErrCapabilityUnsupported) {
 		return false
 	}
-	return errors.Is(err, llmtypes.ErrRateLimited) ||
-		errors.Is(err, llmtypes.ErrProviderUnavailable)
+	if errors.Is(err, llmtypes.ErrRateLimited) ||
+		errors.Is(err, llmtypes.ErrProviderUnavailable) {
+		return true
+	}
+	// Transport failures are transient: a connection reset or a DNS hiccup
+	// is worth another attempt.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var syscallErr *os.SyscallError
+	if errors.As(err, &syscallErr) {
+		return true
+	}
+	return false
 }
 
 // withRetry runs fn, retrying transient failures with exponential backoff and

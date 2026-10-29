@@ -17,9 +17,13 @@ import (
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
+	"github.com/dedek0/mobiscope/internal/llm/providers/openai_compatible"
 )
 
 const (
+	// maxErrorBodyBytes caps how much of an error response is read.
+	maxErrorBodyBytes = 64 << 10
+
 	defaultBaseURL = "http://localhost:11434"
 	healthPath     = "/"
 	tagsPath       = "/api/tags"
@@ -59,9 +63,21 @@ func NewWithHTTPClient(baseURL string, client *http.Client, logger *slog.Logger)
 	}
 }
 
-func (p *Provider) Name() string                { return "ollama" }
-func (p *Provider) Kind() llmtypes.ProviderKind { return llmtypes.KindLocal }
-func (p *Provider) IsLocal() bool               { return true }
+func (p *Provider) Name() string { return "ollama" }
+
+// Kind derives the trust level from the configured base URL. An Ollama
+// endpoint that is not on the loopback interface is a remote service, and
+// treating it as local would let the cloud policy be bypassed and secrets
+// shipped to it.
+func (p *Provider) Kind() llmtypes.ProviderKind {
+	if openaicompatible.IsLocalURL(p.baseURL) {
+		return llmtypes.KindLocal
+	}
+	return llmtypes.KindCloud
+}
+
+// IsLocal reports whether the provider runs on the loopback interface.
+func (p *Provider) IsLocal() bool { return p.Kind() == llmtypes.KindLocal }
 func (p *Provider) Capabilities() llmtypes.Capabilities {
 	return llmtypes.Capabilities{
 		JSONMode:    true,
@@ -193,7 +209,7 @@ func (p *Provider) Chat(ctx context.Context, req llmtypes.ChatRequest) (*llmtype
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return nil, fmt.Errorf("chat returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
@@ -247,7 +263,7 @@ func (p *Provider) ChatStream(ctx context.Context, req llmtypes.ChatRequest) (io
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return nil, fmt.Errorf("stream returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
@@ -298,7 +314,7 @@ func (p *Provider) Pull(ctx context.Context, model string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return fmt.Errorf("pull returned status %d: %s", resp.StatusCode, string(errBody))
 	}
 
