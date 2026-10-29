@@ -395,24 +395,38 @@ type stageOptions struct {
 	expectCert string
 }
 
+// optInStages are the optional scanners. They never run on a default pass:
+// the operator has to name them in --stages.
+var optInStages = map[string]bool{
+	"gitleaks": true,
+	"semgrep":  true,
+}
+
 // stageEnabled reports whether a stage runs, honouring the explicit filter
-// and the quick/no-secrets switches.
+// and the quick/no-secrets switches. The scanners are opt-in; every other
+// stage runs by default or when named. apksigner is implicit for Android and
+// cannot be disabled.
 func (o stageOptions) stageEnabled(name string) bool {
-	if o.quick && (name == "gitleaks" || name == "semgrep") {
+	if o.quick && optInStages[name] {
 		return false
 	}
 	if o.noSecrets && name == "gitleaks" {
 		return false
 	}
-	if len(o.stages) == 0 {
+	if name == "apksigner" {
 		return true
 	}
+	named := false
 	for _, s := range o.stages {
 		if s == name {
-			return true
+			named = true
+			break
 		}
 	}
-	return false
+	if optInStages[name] {
+		return named
+	}
+	return len(o.stages) == 0 || named
 }
 
 // rulePackPath resolves the semgrep rule pack: the explicit override when

@@ -104,53 +104,56 @@ func withStubPATH(t *testing.T, dir string) {
 
 func TestBuildAnalyzers_AndroidDefaults(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, androidTarget())
-	// The default stage set runs the full detection stack: decompilers,
-	// signature verification, secret scanning and the semgrep rule pack.
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk", "gitleaks", "semgrep"}, analyzerNames(list))
+	// The default set runs the decompilers, the implicit signature check and
+	// the in-process analyzers. The scanners are opt-in.
+	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_NilTargetDefaultsToAndroid(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, nil)
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk", "gitleaks", "semgrep"}, analyzerNames(list))
+	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_AndroidStageFilter(t *testing.T) {
 	list := buildAnalyzers(stageOptions{stages: []string{"jadx", "gitleaks"}}, androidTarget())
-	assert.Equal(t, []string{"jadx", "gitleaks"}, analyzerNames(list))
+	// apksigner is implicit and cannot be selected away.
+	assert.Equal(t, []string{"jadx", "apksigner", "gitleaks"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_AndroidScannersOnlyWhenNamed(t *testing.T) {
 	// "inventory" selects nothing from the analyzer list (inventory runs as a
-	// pipeline phase).
+	// pipeline phase); the implicit signature check still runs.
 	list := buildAnalyzers(stageOptions{stages: []string{"inventory"}}, androidTarget())
-	assert.Empty(t, analyzerNames(list))
+	assert.Equal(t, []string{"apksigner"}, analyzerNames(list))
 
 	list = buildAnalyzers(stageOptions{stages: []string{"gitleaks", "semgrep"}}, androidTarget())
-	assert.Equal(t, []string{"gitleaks", "semgrep"}, analyzerNames(list))
+	assert.Equal(t, []string{"apksigner", "gitleaks", "semgrep"}, analyzerNames(list))
 }
 
-func TestBuildAnalyzers_QuickDisablesOptionalScanners(t *testing.T) {
+func TestBuildAnalyzers_QuickKeepsDefaultStages(t *testing.T) {
+	// The scanners are already opt-in, so --quick does not change the
+	// default set.
 	list := buildAnalyzers(stageOptions{quick: true}, androidTarget())
 	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
-func TestBuildAnalyzers_NoSecretsKeepsSemgrep(t *testing.T) {
-	list := buildAnalyzers(stageOptions{noSecrets: true}, androidTarget())
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk", "semgrep"}, analyzerNames(list))
+func TestBuildAnalyzers_NoSecretsSkipsOnlyGitleaks(t *testing.T) {
+	list := buildAnalyzers(stageOptions{noSecrets: true, stages: []string{"gitleaks", "semgrep"}}, androidTarget())
+	assert.Equal(t, []string{"apksigner", "semgrep"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_DecompilerSelection(t *testing.T) {
 	list := buildAnalyzers(stageOptions{decompiler: "jadx"}, androidTarget())
-	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk", "gitleaks", "semgrep"}, analyzerNames(list))
+	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 
 	list = buildAnalyzers(stageOptions{decompiler: "apktool"}, androidTarget())
-	assert.Equal(t, []string{"apktool", "apksigner", "elf", "anti_analysis", "repack", "sdk", "gitleaks", "semgrep"}, analyzerNames(list))
+	assert.Equal(t, []string{"apktool", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_IOSDefaults(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, iosTarget())
 	assert.Equal(t,
-		[]string{"ipa-extract", "plist", "macho", "codesign", "classdump", "strings", "gitleaks", "semgrep"},
+		[]string{"ipa-extract", "plist", "macho", "codesign", "classdump", "strings"},
 		analyzerNames(list))
 }
 
@@ -189,7 +192,7 @@ func TestBuildAnalyzers_NoResPropagation(t *testing.T) {
 			withStubPATH(t, stubDir)
 
 			list := buildAnalyzers(stageOptions{noRes: tt.noRes, decompiler: "both"}, androidTarget())
-			require.Len(t, list, 9)
+			require.Len(t, list, 7)
 			workdir := t.TempDir()
 			for _, a := range list {
 				// Only the decompilers are stubbed; the scanners are
