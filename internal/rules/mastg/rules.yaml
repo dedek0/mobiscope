@@ -292,3 +292,175 @@ rules:
       masvs: MASVS-CRYPTO-1
       mastg: [MASTG-TEST-0063]
       reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-webview-debugging
+    patterns:
+      - pattern-either:
+          - pattern: $W.setWebContentsDebuggingEnabled(true)
+          - pattern: |
+              setWebContentsDebuggingEnabled(true)
+    message: WebView debugging is enabled, which exposes the rendered content to anyone with a USB connection.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  - id: mastg-webview-ssl-error
+    patterns:
+      - pattern-either:
+          - pattern: $W.onReceivedSslError($V, $E, $H)
+          - pattern: $H.proceed()
+    message: The WebView continues past an SSL error, which defeats TLS validation for the whole view.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-NETWORK-2
+      mastg: [MASTG-TEST-0053]
+      reference: https://mas.owasp.org/MASWE/MASWE-0005/
+
+  - id: mastg-webview-mixed-content
+    patterns:
+      - pattern-either:
+          - pattern: $W.setMixedContentMode(0)
+          - pattern: |
+              setMixedContentMode(0)
+    message: The WebView allows mixed content, so an attacker on the network can inject active content into an HTTPS page.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-NETWORK-2
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0005/
+
+  - id: mastg-webview-save-password
+    patterns:
+      - pattern-either:
+          - pattern: $W.setSavePassword(true)
+          - pattern: |
+              setSavePassword(true)
+    message: The WebView saves form passwords in the global password store.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  - id: mastg-storage-world-accessible
+    patterns:
+      - pattern-either:
+          - pattern: $X.openFileOutput(..., $M)
+          - pattern: $X.getSharedPreferences(..., $M)
+          - pattern: MODE_WORLD_READABLE
+          - pattern: MODE_WORLD_WRITEABLE
+    message: The file or preference is opened in world-readable or world-writable mode, so any app on the device can read or modify it.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  - id: mastg-storage-external
+    patterns:
+      - pattern-either:
+          - pattern: $X.getExternalStorageDirectory()
+          - pattern: $X.getExternalFilesDir(...)
+          - pattern: $X.getExternalCacheDir()
+    message: The app writes to shared external storage, which other apps with storage permission can read.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  - id: mastg-crypto-hardcoded-key
+    patterns:
+      - pattern-either:
+          - pattern: new SecretKeySpec("...", ...)
+          - pattern: new SecretKeySpec($B, ...)
+    message: A cryptographic key is built from a literal, so it is recoverable from the binary.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-crypto-no-padding
+    patterns:
+      - pattern-either:
+          - pattern: Cipher.getInstance("...", "NoPadding")
+          - pattern: Cipher.getInstance("NoPadding")
+    message: The cipher uses NoPadding, which removes the protection padding provides against padding-oracle attacks.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-crypto-pbe-weak
+    patterns:
+      - pattern-either:
+          - pattern: $PBEKeySpec(...)
+          - pattern: SecretKeyFactory.getInstance("PBKDF...")
+    message: A password-based key derivation is used; check that the iteration count is high enough for the platform.
+    severity: INFO
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: INFO
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-network-legacy-tls
+    patterns:
+      - pattern-either:
+          - pattern: $S.setEnabledProtocols(...)
+          - pattern-regex: |-
+              (?i)"(TLSv1|TLSv1\.1|SSLv3|Ssl3)"
+    message: The TLS protocol versions are selected explicitly; TLS 1.0 and 1.1 are deprecated and must not be enabled.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-NETWORK-2
+      mastg: [MASTG-TEST-0053]
+      reference: https://mas.owasp.org/MASWE/MASWE-0005/
+
+  - id: mastg-webview-local-file
+    patterns:
+      - pattern-either:
+          - pattern: $W.loadUrl("file://...")
+          - pattern: $W.loadDataWithBaseURL(..., "file://...", ...)
+    message: The WebView loads a local file URL, which can expose the app's private files to page content.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
