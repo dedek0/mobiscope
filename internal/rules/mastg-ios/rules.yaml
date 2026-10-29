@@ -1,5 +1,5 @@
 # MASTG-aligned semgrep rules for iOS (Swift / Objective-C / C).
-# Schema matches rules/mastg/rules.yaml so the SARIF converter picks up
+# Schema matches mastg/rules.yaml so the SARIF converter picks up
 # metadata.masvs / metadata.category automatically.
 
 rules:

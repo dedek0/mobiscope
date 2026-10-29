@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file-sharing, URL schemes), `macho` (native libs, encryption, dylib
   linkage), `codesign` (entitlements, provisioning profile), `strings`
   (secret/pinning regexes), `inventory-ios` (obfuscation + combined signals).
-- `rules/mastg-ios/rules.yaml` semgrep pack for Swift/Objective-C/C.
+- `internal/rules/mastg-ios/rules.yaml` semgrep pack for Swift/Objective-C/C.
 - Android manifest decoded with `encoding/xml`: typed exported components,
   intent-filters, modern dangerous permissions, custom permission protection
   levels, `allowBackup`/`testOnly`/`usesCleartextTraffic`/`grantUriPermissions`.

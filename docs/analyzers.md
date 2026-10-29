@@ -210,11 +210,11 @@ Details and known gaps:
 
 | Goal | Stages |
 |------|--------|
-| Full Android report (default) | `apktool`, `jadx`, `inventory` (+ implicit apksigner) |
+| Full Android report (default) | `apktool`, `jadx`, `elf`, `anti-analysis`, `repack`, `sdk`, `inventory` (+ implicit apksigner) |
 | Secrets from decompiled code | `jadx` **and** `gitleaks` (gitleaks alone scans a nearly empty dir) |
 | MASVS/MASTG rule matches | `jadx` **and** `semgrep` (needs a full source tree) |
 | Manifest/NSC findings only | `inventory` (works off `jadx/`, or a pre-seeded tree — `scripts/smoke.sh` does exactly that) |
-| Fast iOS pass | defaults; add `gitleaks,semgrep` for `rules/mastg-ios` |
+| Fast iOS pass | defaults; add `gitleaks,semgrep` to use the embedded iOS pack |
 | Signed-artifact facts | automatic on Android — no stage needed |
 
 Cross-cutting behavior:

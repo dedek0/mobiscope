@@ -279,7 +279,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 | Empty report from an IPA | Old builds treated every input as an APK. Update and re-run; `analyze` now detects the platform. |
 | Exit code 4 | Cloud provider blocked or unavailable. Check `allow_cloud` and `llm health`. |
 | `jadx` runs out of memory | Set `JAVA_OPTS=-Xmx4g` or use `--stages apktool,inventory` first. |
-| semgrep rule pack fails to load | Validate with `semgrep --validate --config rules/mastg` (or `rules/mastg-ios`). |
+| semgrep rule pack fails to load | Validate with `semgrep --validate --config internal/rules/mastg/rules.yaml` (or `internal/rules/mastg-ios/rules.yaml`). |
 | `gitleaks` exits with code 1 | Not an error: gitleaks uses **1 for "leaks found"** (0 = clean, >= 2 = tool failure). mobiscope accepts 0 and 1 as success and only fails the stage on >= 2; `--exit-code` is not overridden. |
 | Ollama unreachable | `ollama serve` and check `OLLAMA_HOST` (default `http://localhost:11434`). |
 | Config not picked up | Run with `--config` explicitly; see the discovery order above. |
@@ -289,7 +289,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 ## iOS analysis notes
 
 `analyze app.ipa` runs `ipa-extract` → `plist`, `macho`, `codesign`, `strings`
-plus `inventory-ios` and `rules/mastg-ios`. Coverage is best-effort on Linux:
+plus `inventory-ios` and the embedded iOS rule pack. Coverage is best-effort on Linux:
 FairPlay-encrypted binaries are detected and flagged as not statically
 analyzable. For `codesign(1)`-grade verification run the tool on macOS.
 
