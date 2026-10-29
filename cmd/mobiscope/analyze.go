@@ -18,6 +18,7 @@ import (
 	"github.com/dedek0/mobiscope/internal/models"
 	"github.com/dedek0/mobiscope/internal/pipeline"
 	"github.com/dedek0/mobiscope/internal/platform"
+	"github.com/dedek0/mobiscope/internal/rules"
 	"github.com/dedek0/mobiscope/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,14 @@ func newAnalyzeCmd() *cobra.Command {
 		dryRun         bool
 		maxConc        int
 		expectSHA      string
+		strict         bool
+		quick          bool
+		noSecrets      bool
+		rulesPath      string
+		decompiler     string
+		expectCert     string
+		osvLookup      bool
+		writeSBOM      bool
 	)
 
 	cmd := &cobra.Command{
@@ -69,13 +78,16 @@ func newAnalyzeCmd() *cobra.Command {
 				MaxConcurrency: maxConc,
 				FailFast:       failFast,
 				DryRun:         dryRun,
+				Strict:         strict,
 			}
 			if maxConc <= 0 {
-				if cfg, err := loadConfigWithFlags(c); err == nil {
-					opts.MaxConcurrency = cfg.Pipeline.MaxConcurrency
-					if !failFast {
-						opts.FailFast = cfg.Pipeline.FailFast
-					}
+				cfg, err := loadConfigWithFlags(c)
+				if err != nil {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				opts.MaxConcurrency = cfg.Pipeline.MaxConcurrency
+				if !failFast {
+					opts.FailFast = cfg.Pipeline.FailFast
 				}
 			}
 
@@ -91,6 +103,13 @@ func newAnalyzeCmd() *cobra.Command {
 					triageProvider: triageProvider,
 					dryRun:         dryRun,
 					expectSHA:      expectSHA,
+					quick:          quick,
+					noSecrets:      noSecrets,
+					rulesPath:      rulesPath,
+					decompiler:     decompiler,
+					expectCert:     expectCert,
+					osvLookup:      osvLookup,
+					writeSBOM:      writeSBOM,
 					logger:         logger,
 					ctx:            ctx,
 				})
@@ -140,6 +159,14 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "List the stages that would run without executing")
 	cmd.Flags().IntVar(&maxConc, "max-concurrency", 0, "Max external tools running at once (default from config)")
 	cmd.Flags().StringVar(&expectSHA, "expect-sha256", "", "Expected SHA-256 of each target (hex); analysis aborts before any tool runs on mismatch")
+	cmd.Flags().BoolVar(&strict, "strict", false, "Exit non-zero when any analyzer fails (the report is marked partial)")
+	cmd.Flags().BoolVar(&quick, "quick", false, "Skip the optional scanners (gitleaks, semgrep) for a faster pass")
+	cmd.Flags().BoolVar(&noSecrets, "no-secrets", false, "Skip the gitleaks secret scanner")
+	cmd.Flags().StringVar(&rulesPath, "rules", "", "Path to a custom semgrep rule pack (default: the embedded MASTG pack)")
+	cmd.Flags().StringVar(&decompiler, "decompiler", "both", "Decompiler to run: apktool, jadx or both")
+	cmd.Flags().StringVar(&expectCert, "expect-cert", "", "Expected signing certificate fingerprint (hex); a mismatch is reported as a repackaging signal")
+	cmd.Flags().BoolVar(&osvLookup, "osv", false, "Look the detected libraries up in the OSV vulnerability database (reaches the network)")
+	cmd.Flags().BoolVar(&writeSBOM, "sbom", false, "Write a CycloneDX software bill of materials next to the report")
 
 	return cmd
 }
@@ -158,6 +185,13 @@ type targetFlags struct {
 	dryRun         bool
 	triageProvider string
 	expectSHA      string
+	quick          bool
+	noSecrets      bool
+	rulesPath      string
+	decompiler     string
+	expectCert     string
+	osvLookup      bool
+	writeSBOM      bool
 	logger         *slog.Logger
 	ctx            context.Context
 }
@@ -193,7 +227,15 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	targetOpts := *opts
 	targetOpts.Platform = target.Platform
 
-	analyzersList := buildAnalyzers(stageFilter, tf.noRes, target)
+	analyzersList := buildAnalyzers(stageOptions{
+		stages:     stageFilter,
+		noRes:      tf.noRes,
+		quick:      tf.quick,
+		noSecrets:  tf.noSecrets,
+		rules:      tf.rulesPath,
+		decompiler: tf.decompiler,
+		expectCert: tf.expectCert,
+	}, target)
 	p := pipeline.NewWithOptions(analyzersList, tf.logger, targetOpts)
 
 	session, err := p.Run(tf.ctx, apkPath, workdir, stageFilter)
@@ -209,18 +251,44 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 		return session, nil
 	}
 
+	sessionDir := filepath.Join(workdir, session.ID)
+
 	if tf.triage {
 		if err := runTriage(c, session, workdir, tf.logger, tf.triageProvider); err != nil {
 			return session, fmt.Errorf("triage failed: %w", err)
 		}
-		sessionDir := filepath.Join(workdir, session.ID)
 		if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
 			return session, fmt.Errorf("persisting triage results: %w", err)
 		}
 	}
 
+	if tf.osvLookup {
+		vulns, err := lookupOSV(c.Context(), session, tf.logger)
+		if err != nil {
+			// A failed lookup must not lose the analysis that already
+			// succeeded.
+			tf.logger.Warn("OSV lookup failed", "error", err)
+		} else {
+			session.App.Vulnerabilities = vulns
+			session.Findings = append(session.Findings, vulnerabilityFindings(session, vulns)...)
+			if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+				return session, fmt.Errorf("persisting vulnerability results: %w", err)
+			}
+		}
+	}
+
+	if tf.writeSBOM {
+		if err := writeSBOMFile(sessionDir, session); err != nil {
+			return session, fmt.Errorf("writing SBOM: %w", err)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "Analysis complete: %s (status: %s)\n", session.ID, session.Status)
 	fmt.Fprintf(os.Stderr, "Findings: %d\n", len(session.Findings))
+	if len(session.FailedTools) > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: %d stage(s) failed (%s) — the report is partial\n",
+			len(session.FailedTools), strings.Join(session.FailedTools, ", "))
+	}
 	if tf.triage {
 		fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
 	}
@@ -304,55 +372,123 @@ func countTriaged(findings []models.Finding) int {
 	return count
 }
 
-func buildAnalyzers(stages []string, noRes bool, target *platform.Target) []analyzers.Analyzer {
-	stageSet := make(map[string]bool)
-	for _, s := range stages {
-		stageSet[s] = true
-	}
-	want := func(name string) bool { return len(stages) == 0 || stageSet[name] }
+// stageOptions controls which stages run and how the toolchain is configured.
+type stageOptions struct {
+	// stages is the explicit stage filter; empty means "use the defaults".
+	stages []string
+	// noRes skips resource decoding in the decompilers.
+	noRes bool
+	// quick disables the optional scanners (gitleaks and semgrep).
+	quick bool
+	// noSecrets disables only the gitleaks secret scanner.
+	noSecrets bool
+	// rules overrides the embedded semgrep rule pack.
+	rules string
+	// decompiler selects which decompiler(s) run: apktool, jadx or both.
+	decompiler string
+	// expectCert is the signing certificate fingerprint the artifact is
+	// expected to carry.
+	expectCert string
+}
 
+// stageEnabled reports whether a stage runs, honouring the explicit filter
+// and the quick/no-secrets switches.
+func (o stageOptions) stageEnabled(name string) bool {
+	if o.quick && (name == "gitleaks" || name == "semgrep") {
+		return false
+	}
+	if o.noSecrets && name == "gitleaks" {
+		return false
+	}
+	if len(o.stages) == 0 {
+		return true
+	}
+	for _, s := range o.stages {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+// rulePackPath resolves the semgrep rule pack: the explicit override when
+// given, otherwise the copy embedded in the binary.
+func rulePackPath(override string, pack rules.Pack) string {
+	if override != "" {
+		return override
+	}
+	path, err := rules.Materialize(pack)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Analyzer {
 	var list []analyzers.Analyzer
 
 	if target != nil && target.Platform == models.PlatformIOS {
-		if want("ipa-extract") {
+		if opts.stageEnabled("ipa-extract") {
 			list = append(list, analyzers.NewIPAExtract())
 		}
-		if want("plist") {
+		if opts.stageEnabled("plist") {
 			list = append(list, analyzers.NewPlistAnalyzer())
 		}
-		if want("macho") {
+		if opts.stageEnabled("macho") {
 			list = append(list, analyzers.NewMachO())
 		}
-		if want("codesign") {
+		if opts.stageEnabled("codesign") {
 			list = append(list, analyzers.NewCodeSign())
 		}
-		if want("classdump") {
+		if opts.stageEnabled("classdump") {
 			list = append(list, analyzers.NewClassDump())
 		}
-		if want("strings") {
+		if opts.stageEnabled("strings") {
 			list = append(list, analyzers.NewStrings())
 		}
-		if stageSet["gitleaks"] {
+		if opts.stageEnabled("gitleaks") {
 			list = append(list, analyzers.NewGitleaks())
 		}
-		if stageSet["semgrep"] {
-			list = append(list, analyzers.NewSemgrep("rules/mastg-ios"))
+		if opts.stageEnabled("semgrep") {
+			list = append(list, analyzers.NewSemgrep(rulePackPath(opts.rules, rules.PackIOS)))
 		}
 		return list
 	}
 
 	// Android (default).
-	if want("apktool") {
-		list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: noRes}))
+	switch opts.decompiler {
+	case "apktool":
+		list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
+	case "jadx":
+		list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
+	default:
+		if opts.stageEnabled("apktool") {
+			list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
+		}
+		if opts.stageEnabled("jadx") {
+			list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
+		}
 	}
-	if want("jadx") {
-		list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: noRes}))
+	if opts.stageEnabled("apksigner") {
+		list = append(list, analyzers.NewApkSigner())
 	}
-	if stageSet["gitleaks"] {
+	if opts.stageEnabled("elf") {
+		list = append(list, analyzers.NewELF())
+	}
+	if opts.stageEnabled("anti-analysis") {
+		list = append(list, analyzers.NewAntiAnalysis())
+	}
+	if opts.stageEnabled("repack") {
+		list = append(list, analyzers.NewRepackWithExpectedCert(opts.expectCert))
+	}
+	if opts.stageEnabled("sdk") {
+		list = append(list, analyzers.NewSDK())
+	}
+	if opts.stageEnabled("gitleaks") {
 		list = append(list, analyzers.NewGitleaks())
 	}
-	if stageSet["semgrep"] {
-		list = append(list, analyzers.NewSemgrep("rules/mastg"))
+	if opts.stageEnabled("semgrep") {
+		list = append(list, analyzers.NewSemgrep(rulePackPath(opts.rules, rules.PackAndroid)))
 	}
 	return list
 }
