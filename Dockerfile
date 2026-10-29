@@ -78,7 +78,6 @@ RUN pip3 install --no-cache-dir "semgrep==1.127.1" \
     && semgrep --version
 
 COPY --from=builder /mobiscope /usr/local/bin/mobiscope
-COPY --from=builder /src/rules /app/rules
 
 WORKDIR /app
 
