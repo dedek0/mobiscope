@@ -148,7 +148,7 @@ func ConvertMachOFindings(raw []byte, sessionID string) []models.Finding {
 		}
 		for _, dep := range lib.Linked {
 			low := strings.ToLower(dep)
-			if strings.Contains(low, "substrate") || strings.Contains(low, "cycript") || strings.Contains(low, "frida") {
+			if strings.Contains(low, markerSubstrate) || strings.Contains(low, "cycript") || strings.Contains(low, markerFrida) {
 				add(lib, "Links jailbreak tooling library",
 					fmt.Sprintf("%s links %s, commonly used for runtime instrumentation.", lib.Path, dep),
 					dep, models.CategoryObfuscation, models.SeverityHigh, models.SensitivityConfidential, 0.85)

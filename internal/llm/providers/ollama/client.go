@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/llm/llmtypes"
-	"github.com/dedek0/mobiscope/internal/llm/providers/openai_compatible"
+	openaicompatible "github.com/dedek0/mobiscope/internal/llm/providers/openai_compatible"
 )
 
 const (
@@ -78,6 +78,7 @@ func (p *Provider) Kind() llmtypes.ProviderKind {
 
 // IsLocal reports whether the provider runs on the loopback interface.
 func (p *Provider) IsLocal() bool { return p.Kind() == llmtypes.KindLocal }
+
 func (p *Provider) Capabilities() llmtypes.Capabilities {
 	return llmtypes.Capabilities{
 		JSONMode:    true,

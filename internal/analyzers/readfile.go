@@ -41,15 +41,6 @@ func readFileCapped(path string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, limit))
 }
 
-// readFileCappedString is readFileCapped returning a string.
-func readFileCappedString(path string, limit int64) (string, error) {
-	data, err := readFileCapped(path, limit)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 // safeJoinPath joins a base directory with a name taken from untrusted
 // content and guarantees the result stays inside base. It is the guard for
 // paths that come out of an Info.plist or a manifest.

@@ -106,7 +106,7 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 	var findings []models.Finding
 	add := func(title, desc, snippet string, sev models.Severity, sens models.Sensitivity, conf float64) {
 		f := models.Finding{
-			ID:          models.GenerateID(apksignerName, models.CategoryManifestIssue, "META-INF", 1, snippet),
+			ID:          models.GenerateID(apksignerName, models.CategoryManifestIssue, metaInfDir, 1, snippet),
 			SessionID:   sessionID,
 			SourceTool:  apksignerName,
 			Category:    models.CategoryManifestIssue,
@@ -114,7 +114,7 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 			Title:       title,
 			Description: desc,
 			Evidence:    snippet,
-			Location:    models.Location{File: "META-INF", Line: 1, Snippet: snippet},
+			Location:    models.Location{File: metaInfDir, Line: 1, Snippet: snippet},
 			Severity:    sev,
 			Sensitivity: sens,
 			Confidence:  conf,
@@ -225,7 +225,7 @@ func metaInfHeuristic(target string) (scheme, certFP, signerCount string) {
 		}
 	}
 	if certs == 0 {
-		return "none", "", "0"
+		return valueNone, "", "0"
 	}
 	if v1 {
 		return "v1", "", fmt.Sprintf("%d", certs)

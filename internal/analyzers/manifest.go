@@ -200,7 +200,7 @@ func (m *androidManifest) components() []parsedComponent {
 		add("receiver", c)
 	}
 	for _, c := range m.Application.Providers {
-		add("provider", c)
+		add(componentKindProvider, c)
 	}
 	return out
 }
@@ -299,14 +299,14 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 	}
 
 	for _, comp := range m.components() {
-		if comp.Kind == "provider" && comp.GrantURI {
+		if comp.Kind == componentKindProvider && comp.GrantURI {
 			findings = append(findings, manifestFinding(sessionID,
 				fmt.Sprintf("Content provider grants URI permissions: %s", comp.Name),
 				"android:grantUriPermissions=true can expose provider data to other apps.",
 				comp.Name+" grantUriPermissions=\"true\"",
 				models.SeverityHigh, models.SensitivityConfidential, 0.9))
 		}
-		if comp.Kind == "provider" && comp.Exported && comp.ReadPerm == "" && comp.WritePerm == "" {
+		if comp.Kind == componentKindProvider && comp.Exported && comp.ReadPerm == "" && comp.WritePerm == "" {
 			findings = append(findings, manifestFinding(sessionID,
 				fmt.Sprintf("Exported provider without read/write permission: %s", comp.Name),
 				"The provider is exported and declares neither android:readPermission nor android:writePermission, so any app can read from it.",
@@ -367,7 +367,7 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 		}
 		severity := models.SeverityMedium
 		sensitivity := models.SensitivityInternal
-		if comp.Kind == "provider" {
+		if comp.Kind == componentKindProvider {
 			severity = models.SeverityHigh
 			sensitivity = models.SensitivityConfidential
 		}

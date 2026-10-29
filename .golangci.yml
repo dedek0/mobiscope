@@ -17,6 +17,10 @@ linters:
     - unparam
     - whitespace
   settings:
+    exhaustive:
+      # Switches that handle every value they care about end with a default;
+      # treat that as exhaustive (elf.Machine has hundreds of values).
+      default-signifies-exhaustive: true
     goconst:
       min-len: 3
       min-occurrences: 3

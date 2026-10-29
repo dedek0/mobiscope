@@ -75,10 +75,7 @@ func isRetryable(err error) bool {
 		return true
 	}
 	var syscallErr *os.SyscallError
-	if errors.As(err, &syscallErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &syscallErr)
 }
 
 // withRetry runs fn, retrying transient failures with exponential backoff and

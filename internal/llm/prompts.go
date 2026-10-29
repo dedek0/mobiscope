@@ -1,8 +1,8 @@
 package llm
 
 import (
-	_ "embed"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"strings"

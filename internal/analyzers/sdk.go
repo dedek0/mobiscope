@@ -103,66 +103,126 @@ type sdkSignature struct {
 
 // sdkSignatures is the curated table of libraries worth reporting.
 var sdkSignatures = []sdkSignature{
-	{Name: "Firebase Analytics", Group: "com.google.firebase", Artifact: "firebase-analytics",
-		Prefixes: []string{"Lcom/google/firebase/analytics/"}},
-	{Name: "Firebase Crashlytics", Group: "com.google.firebase", Artifact: "firebase-crashlytics",
-		Prefixes: []string{"Lcom/google/firebase/crashlytics/"}},
-	{Name: "Firebase Database", Group: "com.google.firebase", Artifact: "firebase-database",
-		Prefixes: []string{"Lcom/google/firebase/database/"}},
-	{Name: "Firebase Auth", Group: "com.google.firebase", Artifact: "firebase-auth",
-		Prefixes: []string{"Lcom/google/firebase/auth/"}},
-	{Name: "Firebase Messaging", Group: "com.google.firebase", Artifact: "firebase-messaging",
-		Prefixes: []string{"Lcom/google/firebase/messaging/"}},
-	{Name: "Google Mobile Ads", Group: "com.google.android.gms", Artifact: "play-services-ads",
-		Prefixes: []string{"Lcom/google/android/gms/ads/"}},
-	{Name: "Google Play Services Location", Group: "com.google.android.gms", Artifact: "play-services-location",
-		Prefixes: []string{"Lcom/google/android/gms/location/"}},
-	{Name: "Facebook SDK", Group: "com.facebook.android", Artifact: "facebook-android-sdk",
-		Prefixes: []string{"Lcom/facebook/"}, VersionResource: "com_facebook_app_version"},
-	{Name: "React Native", Group: "com.facebook.react", Artifact: "react-native",
-		Prefixes: []string{"Lcom/facebook/react/"}},
-	{Name: "Adjust", Group: "com.adjust.sdk", Artifact: "adjust-android-sdk",
-		Prefixes: []string{"Lcom/adjust/sdk/"}},
-	{Name: "AppsFlyer", Group: "com.appsflyer", Artifact: "appsflyer-sdk",
-		Prefixes: []string{"Lcom/appsflyer/"}},
-	{Name: "Branch", Group: "io.branch.sdk", Artifact: "branch-android-sdk",
-		Prefixes: []string{"Lio/branch/sdk/"}},
-	{Name: "OneSignal", Group: "com.onesignal", Artifact: "onesignal",
-		Prefixes: []string{"Lcom/onesignal/"}},
-	{Name: "Segment", Group: "com.segment", Artifact: "analytics-android",
-		Prefixes: []string{"Lcom/segment/"}},
-	{Name: "Sentry", Group: "io.sentry", Artifact: "sentry-android",
-		Prefixes: []string{"Lio/sentry/"}},
-	{Name: "Bugsnag", Group: "com.bugsnag", Artifact: "bugsnag-android",
-		Prefixes: []string{"Lcom/bugsnag/"}},
-	{Name: "Datadog", Group: "com.datadog", Artifact: "dd-sdk-android",
-		Prefixes: []string{"Lcom/datadog/"}},
-	{Name: "Crashlytics", Group: "com.crashlytics", Artifact: "crashlytics",
-		Prefixes: []string{"Lcom/crashlytics/"}},
-	{Name: "Stripe", Group: "com.stripe", Artifact: "stripe-android",
-		Prefixes: []string{"Lcom/stripe/"}},
-	{Name: "OkHttp", Group: "com.squareup.okhttp3", Artifact: "okhttp",
-		Prefixes: []string{"Lokhttp3/"}},
-	{Name: "Retrofit", Group: "com.squareup.retrofit2", Artifact: "retrofit",
-		Prefixes: []string{"Lretrofit2/"}},
-	{Name: "Okio", Group: "com.squareup.okio", Artifact: "okio",
-		Prefixes: []string{"Lokio/"}},
-	{Name: "Picasso", Group: "com.squareup.picasso", Artifact: "picasso",
-		Prefixes: []string{"Lcom/squareup/picasso/"}},
-	{Name: "Gson", Group: "com.google.code.gson", Artifact: "gson",
-		Prefixes: []string{"Lcom/google/gson/"}},
-	{Name: "Jackson Databind", Group: "com.fasterxml.jackson.core", Artifact: "jackson-databind",
-		Prefixes: []string{"Lcom/fasterxml/jackson/databind/"}},
-	{Name: "Glide", Group: "com.github.bumptech.glide", Artifact: "glide",
-		Prefixes: []string{"Lcom/bumptech/glide/"}},
-	{Name: "Guava", Group: "com.google.guava", Artifact: "guava",
-		Prefixes: []string{"Lcom/google/common/collect/", "Lcom/google/common/base/"}},
-	{Name: "RxJava", Group: "io.reactivex.rxjava2", Artifact: "rxjava",
-		Prefixes: []string{"Lio/reactivex/rxjava2/"}},
-	{Name: "Apache Commons IO", Group: "commons-io", Artifact: "commons-io",
-		Prefixes: []string{"Lorg/apache/commons/io/"}},
-	{Name: "Cordova", Group: "org.apache.cordova", Artifact: "cordova-android",
-		Prefixes: []string{"Lorg/apache/cordova/"}},
+	{
+		Name: "Firebase Analytics", Group: firebaseGroup, Artifact: "firebase-analytics",
+		Prefixes: []string{"Lcom/google/firebase/analytics/"},
+	},
+	{
+		Name: "Firebase Crashlytics", Group: firebaseGroup, Artifact: "firebase-crashlytics",
+		Prefixes: []string{"Lcom/google/firebase/crashlytics/"},
+	},
+	{
+		Name: "Firebase Database", Group: firebaseGroup, Artifact: "firebase-database",
+		Prefixes: []string{"Lcom/google/firebase/database/"},
+	},
+	{
+		Name: "Firebase Auth", Group: firebaseGroup, Artifact: "firebase-auth",
+		Prefixes: []string{"Lcom/google/firebase/auth/"},
+	},
+	{
+		Name: "Firebase Messaging", Group: firebaseGroup, Artifact: "firebase-messaging",
+		Prefixes: []string{"Lcom/google/firebase/messaging/"},
+	},
+	{
+		Name: "Google Mobile Ads", Group: "com.google.android.gms", Artifact: "play-services-ads",
+		Prefixes: []string{"Lcom/google/android/gms/ads/"},
+	},
+	{
+		Name: "Google Play Services Location", Group: "com.google.android.gms", Artifact: "play-services-location",
+		Prefixes: []string{"Lcom/google/android/gms/location/"},
+	},
+	{
+		Name: "Facebook SDK", Group: "com.facebook.android", Artifact: "facebook-android-sdk",
+		Prefixes: []string{"Lcom/facebook/"}, VersionResource: "com_facebook_app_version",
+	},
+	{
+		Name: "React Native", Group: "com.facebook.react", Artifact: "react-native",
+		Prefixes: []string{"Lcom/facebook/react/"},
+	},
+	{
+		Name: "Adjust", Group: "com.adjust.sdk", Artifact: "adjust-android-sdk",
+		Prefixes: []string{"Lcom/adjust/sdk/"},
+	},
+	{
+		Name: "AppsFlyer", Group: "com.appsflyer", Artifact: "appsflyer-sdk",
+		Prefixes: []string{"Lcom/appsflyer/"},
+	},
+	{
+		Name: "Branch", Group: "io.branch.sdk", Artifact: "branch-android-sdk",
+		Prefixes: []string{"Lio/branch/sdk/"},
+	},
+	{
+		Name: "OneSignal", Group: "com.onesignal", Artifact: "onesignal",
+		Prefixes: []string{"Lcom/onesignal/"},
+	},
+	{
+		Name: "Segment", Group: "com.segment", Artifact: "analytics-android",
+		Prefixes: []string{"Lcom/segment/"},
+	},
+	{
+		Name: "Sentry", Group: "io.sentry", Artifact: "sentry-android",
+		Prefixes: []string{"Lio/sentry/"},
+	},
+	{
+		Name: "Bugsnag", Group: "com.bugsnag", Artifact: "bugsnag-android",
+		Prefixes: []string{"Lcom/bugsnag/"},
+	},
+	{
+		Name: "Datadog", Group: "com.datadog", Artifact: "dd-sdk-android",
+		Prefixes: []string{"Lcom/datadog/"},
+	},
+	{
+		Name: "Crashlytics", Group: "com.crashlytics", Artifact: "crashlytics",
+		Prefixes: []string{"Lcom/crashlytics/"},
+	},
+	{
+		Name: "Stripe", Group: "com.stripe", Artifact: "stripe-android",
+		Prefixes: []string{"Lcom/stripe/"},
+	},
+	{
+		Name: "OkHttp", Group: "com.squareup.okhttp3", Artifact: "okhttp",
+		Prefixes: []string{"Lokhttp3/"},
+	},
+	{
+		Name: "Retrofit", Group: "com.squareup.retrofit2", Artifact: "retrofit",
+		Prefixes: []string{"Lretrofit2/"},
+	},
+	{
+		Name: "Okio", Group: "com.squareup.okio", Artifact: "okio",
+		Prefixes: []string{"Lokio/"},
+	},
+	{
+		Name: "Picasso", Group: "com.squareup.picasso", Artifact: "picasso",
+		Prefixes: []string{"Lcom/squareup/picasso/"},
+	},
+	{
+		Name: "Gson", Group: "com.google.code.gson", Artifact: "gson",
+		Prefixes: []string{"Lcom/google/gson/"},
+	},
+	{
+		Name: "Jackson Databind", Group: "com.fasterxml.jackson.core", Artifact: "jackson-databind",
+		Prefixes: []string{"Lcom/fasterxml/jackson/databind/"},
+	},
+	{
+		Name: "Glide", Group: "com.github.bumptech.glide", Artifact: "glide",
+		Prefixes: []string{"Lcom/bumptech/glide/"},
+	},
+	{
+		Name: "Guava", Group: "com.google.guava", Artifact: "guava",
+		Prefixes: []string{"Lcom/google/common/collect/", "Lcom/google/common/base/"},
+	},
+	{
+		Name: "RxJava", Group: "io.reactivex.rxjava2", Artifact: "rxjava",
+		Prefixes: []string{"Lio/reactivex/rxjava2/"},
+	},
+	{
+		Name: "Apache Commons IO", Group: "commons-io", Artifact: "commons-io",
+		Prefixes: []string{"Lorg/apache/commons/io/"},
+	},
+	{
+		Name: "Cordova", Group: "org.apache.cordova", Artifact: "cordova-android",
+		Prefixes: []string{"Lorg/apache/cordova/"},
+	},
 }
 
 // DetectSDKs inspects the DEX files of the target and the decoded resources

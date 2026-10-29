@@ -49,8 +49,11 @@ func (s SessionStatus) IsTerminal() bool {
 	switch s {
 	case StatusCompleted, StatusPartial, StatusFailed:
 		return true
+	case StatusPending, StatusRunning:
+		return false
+	default:
+		return false
 	}
-	return false
 }
 
 // ToolResult represents the output of an external analysis tool.

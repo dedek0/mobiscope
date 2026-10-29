@@ -137,13 +137,13 @@ func scoreEntries(zr *zip.Reader) (apk, ios int) {
 		case entry == "classes.dex" || (strings.HasPrefix(entry, "classes") && strings.HasSuffix(entry, ".dex")):
 			apk += 2
 		case entry == "resources.arsc":
-			apk += 1
+			apk++
 		case strings.HasPrefix(entry, "lib/") && strings.HasSuffix(entry, ".so"):
 			apk++
 		case ipaAppPlistRe.MatchString(entry):
 			ios += 3
 		case ipaAppDirRe.MatchString(entry):
-			ios += 1
+			ios++
 		case strings.HasPrefix(entry, "Payload/") && strings.HasSuffix(entry, "/Info.plist"):
 			ios++
 		case strings.HasPrefix(entry, "_CodeSignature/"), strings.HasPrefix(entry, "SwiftSupport/"):

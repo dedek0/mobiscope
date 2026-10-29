@@ -99,7 +99,7 @@ func ConvertRepackFindings(raw []byte, sessionID string) []models.Finding {
 	var findings []models.Finding
 	for _, ind := range out.Indicators {
 		f := models.Finding{
-			ID:          models.GenerateID(repackName, models.CategoryManifestIssue, "META-INF", 1, ind.Evidence),
+			ID:          models.GenerateID(repackName, models.CategoryManifestIssue, metaInfDir, 1, ind.Evidence),
 			SessionID:   sessionID,
 			SourceTool:  repackName,
 			Category:    models.CategoryManifestIssue,
@@ -107,7 +107,7 @@ func ConvertRepackFindings(raw []byte, sessionID string) []models.Finding {
 			Title:       ind.Title,
 			Description: ind.Description,
 			Evidence:    ind.Evidence,
-			Location:    models.Location{File: "META-INF", Line: 1, Snippet: ind.Evidence},
+			Location:    models.Location{File: metaInfDir, Line: 1, Snippet: ind.Evidence},
 			Severity:    ind.Severity,
 			Sensitivity: models.SensitivityConfidential,
 			Confidence:  ind.Confidence,
@@ -117,7 +117,7 @@ func ConvertRepackFindings(raw []byte, sessionID string) []models.Finding {
 
 	if out.ExpectedCert != "" && !out.CertMatches {
 		f := models.Finding{
-			ID:          models.GenerateID(repackName, models.CategoryManifestIssue, "META-INF", 1, "cert-mismatch"),
+			ID:          models.GenerateID(repackName, models.CategoryManifestIssue, metaInfDir, 1, "cert-mismatch"),
 			SessionID:   sessionID,
 			SourceTool:  repackName,
 			Category:    models.CategoryManifestIssue,
@@ -125,7 +125,7 @@ func ConvertRepackFindings(raw []byte, sessionID string) []models.Finding {
 			Title:       "Signing certificate does not match the expected one",
 			Description: fmt.Sprintf("The archive is signed with %s but %s was expected. The artifact is not the one that was supposed to be analysed.", shortFingerprint(out.ActualCert), shortFingerprint(out.ExpectedCert)),
 			Evidence:    "cert-mismatch",
-			Location:    models.Location{File: "META-INF", Line: 1, Snippet: "cert-mismatch"},
+			Location:    models.Location{File: metaInfDir, Line: 1, Snippet: "cert-mismatch"},
 			Severity:    models.SeverityCritical,
 			Sensitivity: models.SensitivityConfidential,
 			Confidence:  1.0,

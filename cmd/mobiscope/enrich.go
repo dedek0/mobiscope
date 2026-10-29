@@ -33,9 +33,9 @@ func lookupOSV(ctx context.Context, session *models.AnalysisSession, logger *slo
 // vulnerabilityFindings turns the advisories into findings so they show up in
 // the report and in the SARIF export.
 func vulnerabilityFindings(session *models.AnalysisSession, vulns []models.Vulnerability) []models.Finding {
-	var out []models.Finding
+	out := make([]models.Finding, 0, len(vulns))
 	for _, v := range vulns {
-		severity := models.SeverityHigh
+		var severity models.Severity
 		switch {
 		case v.Severity == "":
 			severity = models.SeverityHigh
@@ -96,8 +96,5 @@ func writeSBOMFile(sessionDir string, session *models.AnalysisSession) error {
 		return err
 	}
 	path := filepath.Join(sessionDir, "sbom.cdx.json")
-	if err := utils.WriteFile(path, data); err != nil {
-		return err
-	}
-	return nil
+	return utils.WriteFile(path, data)
 }

@@ -28,7 +28,7 @@ func buildMinimalDEX(t *testing.T, classes []string) []byte {
 	stringDataOff := uint32(headerSize) + uint32(len(classes))*4
 
 	for _, c := range classes {
-		stringOffsets = append(stringOffsets, uint32(stringDataOff)+uint32(len(stringData)))
+		stringOffsets = append(stringOffsets, stringDataOff+uint32(len(stringData)))
 		stringData = append(stringData, 0x01) // uleb128 length placeholder
 		stringData = append(stringData, []byte(c)...)
 		stringData = append(stringData, 0x00)

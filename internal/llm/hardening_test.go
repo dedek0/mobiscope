@@ -131,13 +131,16 @@ func (c *countingProvider) IsLocal() bool               { return true }
 func (c *countingProvider) Capabilities() llmtypes.Capabilities {
 	return llmtypes.Capabilities{JSONMode: true}
 }
+
 func (c *countingProvider) IsAvailable(context.Context) bool {
 	c.availCalls++
 	return true
 }
+
 func (c *countingProvider) Models(context.Context) ([]llmtypes.ModelInfo, error) {
 	return nil, nil
 }
+
 func (c *countingProvider) Chat(context.Context, llmtypes.ChatRequest) (*llmtypes.ChatResponse, error) {
 	c.chatCalls++
 	return &llmtypes.ChatResponse{
@@ -146,6 +149,7 @@ func (c *countingProvider) Chat(context.Context, llmtypes.ChatRequest) (*llmtype
 		Model:    "test-model",
 	}, nil
 }
+
 func (c *countingProvider) ChatStream(context.Context, llmtypes.ChatRequest) (io.ReadCloser, error) {
 	return nil, nil
 }

@@ -14,6 +14,9 @@ import (
 // SpecVersion is the CycloneDX spec version the document targets.
 const SpecVersion = "1.5"
 
+// scopeRequired marks a component that is required at runtime.
+const scopeRequired = "required"
+
 // Document is a CycloneDX bill of materials.
 type Document struct {
 	BOMFormat    string      `json:"bomFormat"`
@@ -81,7 +84,7 @@ func Build(session *models.AnalysisSession) *Document {
 		Type:    "application",
 		Name:    appName(session),
 		Version: session.VersionName,
-		Scope:   "required",
+		Scope:   scopeRequired,
 		Properties: []Property{
 			{Name: "mobiscope:package_name", Value: session.PackageName},
 			{Name: "mobiscope:apk_sha256", Value: session.APKHash},
@@ -96,7 +99,7 @@ func Build(session *models.AnalysisSession) *Document {
 			Group:   sdk.Group,
 			Name:    sdk.Artifact,
 			Version: sdk.Version,
-			Scope:   "required",
+			Scope:   scopeRequired,
 		}
 		if comp.Name == "" {
 			comp.Name = sdk.Name
@@ -110,7 +113,7 @@ func Build(session *models.AnalysisSession) *Document {
 		comp := Component{
 			Type:    "library",
 			Name:    lib.Path,
-			Scope:   "required",
+			Scope:   scopeRequired,
 			Version: lib.Version,
 		}
 		if len(lib.Archs) > 0 {

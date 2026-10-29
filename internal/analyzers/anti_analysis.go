@@ -228,75 +228,139 @@ type antiMarkerPattern struct {
 // behaviour. The entries are matched case-insensitively unless the pattern
 // is marked case-sensitive.
 var antiAnalysisPatterns = []antiMarkerPattern{
-	{needle: "/system/bin/su", kind: "root", title: "App detects root", sev: models.SeverityInfo,
-		desc: "The app checks for the su binary, so it is aware of rooted devices."},
-	{needle: "/system/xbin/su", kind: "root", title: "App detects root", sev: models.SeverityInfo,
-		desc: "The app checks for the su binary, so it is aware of rooted devices."},
-	{needle: "com.topjohnwu.magisk", kind: "root", title: "App detects Magisk", sev: models.SeverityInfo,
-		desc: "The app looks for Magisk, so it is aware of rooted devices."},
-	{needle: "com.noshufou.android.su", kind: "root", title: "App detects root", sev: models.SeverityInfo,
-		desc: "The app looks for a root management app."},
-	{needle: "test-keys", kind: "root", title: "App checks for a test-signed build", sev: models.SeverityLow,
-		desc: "The app inspects the build signature for the test-keys marker, a common root heuristic."},
-	{needle: "su", kind: "root", title: "App detects root", sev: models.SeverityInfo,
-		desc: "The app looks for the su binary, so it is aware of rooted devices."},
+	{
+		needle: "/system/bin/su", kind: markerRoot, title: titleRootDetected, sev: models.SeverityInfo,
+		desc: "The app checks for the su binary, so it is aware of rooted devices.",
+	},
+	{
+		needle: "/system/xbin/su", kind: markerRoot, title: titleRootDetected, sev: models.SeverityInfo,
+		desc: "The app checks for the su binary, so it is aware of rooted devices.",
+	},
+	{
+		needle: "com.topjohnwu.magisk", kind: markerRoot, title: "App detects Magisk", sev: models.SeverityInfo,
+		desc: "The app looks for Magisk, so it is aware of rooted devices.",
+	},
+	{
+		needle: "com.noshufou.android.su", kind: markerRoot, title: titleRootDetected, sev: models.SeverityInfo,
+		desc: "The app looks for a root management app.",
+	},
+	{
+		needle: "test-keys", kind: markerRoot, title: "App checks for a test-signed build", sev: models.SeverityLow,
+		desc: "The app inspects the build signature for the test-keys marker, a common root heuristic.",
+	},
+	{
+		needle: "su", kind: markerRoot, title: titleRootDetected, sev: models.SeverityInfo,
+		desc: "The app looks for the su binary, so it is aware of rooted devices.",
+	},
 
-	{needle: "goldfish", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app checks the hardware fingerprint, a standard emulator heuristic."},
-	{needle: "ranchu", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app checks the hardware fingerprint, a standard emulator heuristic."},
-	{needle: "sdk_gphone", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app checks the build model, a standard emulator heuristic."},
-	{needle: "generic_x86", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app checks the build model, a standard emulator heuristic."},
-	{needle: "ro.kernel.qemu", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app reads the kernel property that identifies a QEMU-based emulator."},
-	{needle: "ro.hardware", kind: "emulator", title: "App detects an emulator", sev: models.SeverityInfo,
-		desc: "The app inspects the hardware property, a standard emulator heuristic."},
+	{
+		needle: "goldfish", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app checks the hardware fingerprint, a standard emulator heuristic.",
+	},
+	{
+		needle: "ranchu", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app checks the hardware fingerprint, a standard emulator heuristic.",
+	},
+	{
+		needle: "sdk_gphone", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app checks the build model, a standard emulator heuristic.",
+	},
+	{
+		needle: "generic_x86", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app checks the build model, a standard emulator heuristic.",
+	},
+	{
+		needle: "ro.kernel.qemu", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app reads the kernel property that identifies a QEMU-based emulator.",
+	},
+	{
+		needle: "ro.hardware", kind: markerEmulator, title: titleEmulatorDetected, sev: models.SeverityInfo,
+		desc: "The app inspects the hardware property, a standard emulator heuristic.",
+	},
 
-	{needle: "isDebuggerConnected", kind: "anti-debug", title: "App detects an attached debugger", sev: models.SeverityInfo,
-		desc: "The app checks whether a debugger is connected."},
-	{needle: "Debug.isDebuggerConnected", kind: "anti-debug", title: "App detects an attached debugger", sev: models.SeverityInfo,
-		desc: "The app checks whether a debugger is connected."},
-	{needle: "TracerPid", kind: "anti-debug", title: "App detects an attached debugger", sev: models.SeverityInfo,
-		desc: "The app reads TracerPid from /proc/self/status, the classic anti-debug trick."},
-	{needle: "/proc/self/status", kind: "anti-debug", title: "App inspects its own process status", sev: models.SeverityLow,
-		desc: "Reading /proc/self/status is how an app detects a debugger or a tracer."},
-	{needle: "android.os.Debug", kind: "anti-debug", title: "App detects an attached debugger", sev: models.SeverityInfo,
-		desc: "The app uses the Debug class, which is where debugger detection lives."},
+	{
+		needle: markerIsDebuggerConnected, kind: markerAntiDebug, title: titleDebuggerDetected, sev: models.SeverityInfo,
+		desc: "The app checks whether a debugger is connected.",
+	},
+	{
+		needle: "Debug.isDebuggerConnected", kind: markerAntiDebug, title: titleDebuggerDetected, sev: models.SeverityInfo,
+		desc: "The app checks whether a debugger is connected.",
+	},
+	{
+		needle: markerTracerPid, kind: markerAntiDebug, title: titleDebuggerDetected, sev: models.SeverityInfo,
+		desc: "The app reads TracerPid from /proc/self/status, the classic anti-debug trick.",
+	},
+	{
+		needle: "/proc/self/status", kind: markerAntiDebug, title: "App inspects its own process status", sev: models.SeverityLow,
+		desc: "Reading /proc/self/status is how an app detects a debugger or a tracer.",
+	},
+	{
+		needle: markerAndroidDebug, kind: markerAntiDebug, title: titleDebuggerDetected, sev: models.SeverityInfo,
+		desc: "The app uses the Debug class, which is where debugger detection lives.",
+	},
 
-	{needle: "frida", kind: "frida", title: "App detects or uses Frida", sev: models.SeverityHigh,
-		desc: "The app references Frida, the most common runtime instrumentation framework for Android."},
-	{needle: "gadget", kind: "frida", title: "App detects or uses Frida", sev: models.SeverityHigh,
-		desc: "The app references Frida, the most common runtime instrumentation framework for Android."},
-	{needle: "xposed", kind: "xposed", title: "App detects or uses Xposed", sev: models.SeverityHigh,
-		desc: "The app references the Xposed framework, which rewrites method calls at runtime."},
-	{needle: "de.robv.android.xposed", kind: "xposed", title: "App detects or uses Xposed", sev: models.SeverityHigh,
-		desc: "The app references the Xposed framework, which rewrites method calls at runtime."},
-	{needle: "substrate", kind: "substrate", title: "App detects or uses Cydia Substrate", sev: models.SeverityHigh,
-		desc: "The app references Cydia Substrate, a native hooking framework."},
-	{needle: "/proc/self/maps", kind: "anti-debug", title: "App inspects its own memory maps", sev: models.SeverityLow,
-		desc: "Reading the memory map is how an app spots injected libraries."},
+	{
+		needle: markerFrida, kind: markerFrida, title: titleFridaDetected, sev: models.SeverityHigh,
+		desc: "The app references Frida, the most common runtime instrumentation framework for Android.",
+	},
+	{
+		needle: "gadget", kind: markerFrida, title: titleFridaDetected, sev: models.SeverityHigh,
+		desc: "The app references Frida, the most common runtime instrumentation framework for Android.",
+	},
+	{
+		needle: markerXposed, kind: markerXposed, title: titleXposedDetected, sev: models.SeverityHigh,
+		desc: "The app references the Xposed framework, which rewrites method calls at runtime.",
+	},
+	{
+		needle: "de.robv.android.xposed", kind: markerXposed, title: titleXposedDetected, sev: models.SeverityHigh,
+		desc: "The app references the Xposed framework, which rewrites method calls at runtime.",
+	},
+	{
+		needle: markerSubstrate, kind: markerSubstrate, title: titleSubstrateDetected, sev: models.SeverityHigh,
+		desc: "The app references Cydia Substrate, a native hooking framework.",
+	},
+	{
+		needle: "/proc/self/maps", kind: markerAntiDebug, title: "App inspects its own memory maps", sev: models.SeverityLow,
+		desc: "Reading the memory map is how an app spots injected libraries.",
+	},
 
-	{needle: "DexClassLoader", kind: "dynamic-code", title: "App loads code dynamically", sev: models.SeverityMedium,
-		desc: "The app loads DEX or JAR files at runtime, which hides code from a static review."},
-	{needle: "PathClassLoader", kind: "dynamic-code", title: "App loads code dynamically", sev: models.SeverityMedium,
-		desc: "The app loads code at runtime from an arbitrary path."},
-	{needle: "InMemoryDexClassLoader", kind: "dynamic-code", title: "App loads code dynamically", sev: models.SeverityMedium,
-		desc: "The app loads DEX code straight from memory, leaving no file to inspect."},
-	{needle: "dalvik.system.DexClassLoader", kind: "dynamic-code", title: "App loads code dynamically", sev: models.SeverityMedium,
-		desc: "The app loads DEX or JAR files at runtime, which hides code from a static review."},
-	{needle: "System.loadLibrary", kind: "native-code", title: "App loads native libraries at runtime", sev: models.SeverityInfo,
-		desc: "The app loads a native library, so part of its behaviour lives outside the Dalvik bytecode."},
-	{needle: "Runtime.getRuntime", kind: "runtime-exec", title: "App shells out to a process", sev: models.SeverityMedium,
-		desc: "The app spawns external processes, which can execute commands the static review cannot see."},
+	{
+		needle: "DexClassLoader", kind: markerDynamicCode, title: titleDynamicCode, sev: models.SeverityMedium,
+		desc: "The app loads DEX or JAR files at runtime, which hides code from a static review.",
+	},
+	{
+		needle: "PathClassLoader", kind: markerDynamicCode, title: titleDynamicCode, sev: models.SeverityMedium,
+		desc: "The app loads code at runtime from an arbitrary path.",
+	},
+	{
+		needle: "InMemoryDexClassLoader", kind: markerDynamicCode, title: titleDynamicCode, sev: models.SeverityMedium,
+		desc: "The app loads DEX code straight from memory, leaving no file to inspect.",
+	},
+	{
+		needle: "dalvik.system.DexClassLoader", kind: markerDynamicCode, title: titleDynamicCode, sev: models.SeverityMedium,
+		desc: "The app loads DEX or JAR files at runtime, which hides code from a static review.",
+	},
+	{
+		needle: "System.loadLibrary", kind: "native-code", title: "App loads native libraries at runtime", sev: models.SeverityInfo,
+		desc: "The app loads a native library, so part of its behaviour lives outside the Dalvik bytecode.",
+	},
+	{
+		needle: "Runtime.getRuntime", kind: "runtime-exec", title: "App shells out to a process", sev: models.SeverityMedium,
+		desc: "The app spawns external processes, which can execute commands the static review cannot see.",
+	},
 
-	{needle: "getPackageInfo", kind: "integrity", title: "App checks its own package signature", sev: models.SeverityInfo,
-		desc: "The app reads a package signature, the usual way to detect a repackaged build."},
-	{needle: "GET_SIGNATURES", kind: "integrity", title: "App checks its own package signature", sev: models.SeverityInfo,
-		desc: "The app reads the signing certificate of an installed package, a repackaging check."},
-	{needle: "PackageManager", kind: "integrity", title: "App inspects installed packages", sev: models.SeverityInfo,
-		desc: "The app queries the package manager, often to check for tampering or for other apps."},
+	{
+		needle: "getPackageInfo", kind: markerIntegrity, title: titleIntegrityCheck, sev: models.SeverityInfo,
+		desc: "The app reads a package signature, the usual way to detect a repackaged build.",
+	},
+	{
+		needle: "GET_SIGNATURES", kind: markerIntegrity, title: titleIntegrityCheck, sev: models.SeverityInfo,
+		desc: "The app reads the signing certificate of an installed package, a repackaging check.",
+	},
+	{
+		needle: "PackageManager", kind: markerIntegrity, title: "App inspects installed packages", sev: models.SeverityInfo,
+		desc: "The app queries the package manager, often to check for tampering or for other apps.",
+	},
 }
 
 // scanAntiAnalysisMarkers looks for the anti-analysis literals in a blob.

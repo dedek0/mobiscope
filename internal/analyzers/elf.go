@@ -112,7 +112,7 @@ func ConvertELFFindings(raw []byte, sessionID string) []models.Finding {
 				fmt.Sprintf("%s is a non-PIE executable; on Android every shipped library must be position-independent, otherwise it is rejected at install time or defeats ASLR.", lib.Path),
 				"pie=false", models.CategoryBinaryHardening, models.SeverityHigh, models.SensitivityInternal, 0.9)
 		}
-		if lib.RELRO == "none" {
+		if lib.RELRO == valueNone {
 			add(lib, "Native library has no RELRO",
 				fmt.Sprintf("%s has no GNU_RELRO segment; the GOT stays writable and is a straightforward overwrite target.", lib.Path),
 				"relro=none", models.CategoryBinaryHardening, models.SeverityMedium, models.SensitivityInternal, 0.85)
@@ -140,10 +140,10 @@ func ConvertELFFindings(raw []byte, sessionID string) []models.Finding {
 		for _, marker := range lib.AntiAnalysis {
 			sev := models.SeverityMedium
 			switch {
-			case strings.Contains(marker, "frida"), strings.Contains(marker, "xposed"),
-				strings.Contains(marker, "substrate"):
+			case strings.Contains(marker, markerFrida), strings.Contains(marker, markerXposed),
+				strings.Contains(marker, markerSubstrate):
 				sev = models.SeverityHigh
-			case strings.Contains(marker, "root"), strings.Contains(marker, "emulator"):
+			case strings.Contains(marker, markerRoot), strings.Contains(marker, markerEmulator):
 				sev = models.SeverityLow
 			}
 			add(lib, "Native library contains an anti-analysis marker",
@@ -271,6 +271,8 @@ func inspectELF(data []byte, name string) *models.NativeLib {
 	case elf.ET_EXEC:
 		no := false
 		lib.PIE = &no
+	default:
+		// Relocatable object or unknown type: PIE cannot be determined.
 	}
 
 	lib.RELRO = elfRELRO(f)
@@ -317,24 +319,24 @@ func elfRELRO(f *elf.File) string {
 		}
 	}
 	if !hasRelro {
-		return "none"
+		return valueNone
 	}
 	// BIND_NOW (either in DT_FLAGS or as DT_BIND_NOW) means every
 	// relocation is resolved at load time, which is full RELRO.
 	if vals, err := f.DynValue(elf.DT_BIND_NOW); err == nil && len(vals) > 0 {
-		return "full"
+		return valueFull
 	}
 	if vals, err := f.DynValue(elf.DT_FLAGS); err == nil {
 		for _, v := range vals {
 			if v&uint64(elf.DF_BIND_NOW) != 0 {
-				return "full"
+				return valueFull
 			}
 		}
 	}
 	if vals, err := f.DynValue(elf.DT_FLAGS_1); err == nil {
 		for _, v := range vals {
 			if v&uint64(elf.DF_1_NOW) != 0 {
-				return "full"
+				return valueFull
 			}
 		}
 	}
@@ -387,14 +389,15 @@ func elfSymbols(f *elf.File) (canary, fortify *bool, stripped bool) {
 		inspect(dyn)
 	}
 
-	if canaryFound {
+	switch {
+	case canaryFound:
 		yes := true
 		canary = &yes
-	} else if stripped {
+	case stripped:
 		// A stripped binary hides the canary symbol; the absence of
 		// evidence is not evidence of absence.
 		canary = nil
-	} else {
+	default:
 		no := false
 		canary = &no
 	}
@@ -460,31 +463,31 @@ var antiAnalysisMarkers = []struct {
 	needle string
 	label  string
 }{
-	{"frida", "frida"},
-	{"libfrida", "frida"},
-	{"xposed", "xposed"},
-	{"de.robv.android.xposed", "xposed"},
-	{"substrate", "substrate"},
+	{markerFrida, markerFrida},
+	{"libfrida", markerFrida},
+	{markerXposed, markerXposed},
+	{"de.robv.android.xposed", markerXposed},
+	{markerSubstrate, markerSubstrate},
 	{"cydia", "cydia"},
-	{"/system/bin/su", "root"},
-	{"/system/xbin/su", "root"},
-	{"com.topjohnwu.magisk", "root"},
-	{"com.noshufou.android.su", "root"},
-	{"test-keys", "root"},
-	{"superuser.apk", "root"},
-	{"ro.debuggable", "emulator"},
-	{"ro.hardware", "emulator"},
-	{"goldfish", "emulator"},
-	{"ranchu", "emulator"},
-	{"sdk_gphone", "emulator"},
-	{"generic_x86", "emulator"},
-	{"TracerPid", "anti-debug"},
-	{"/proc/self/status", "anti-debug"},
-	{"ptrace", "anti-debug"},
-	{"isDebuggerConnected", "anti-debug"},
-	{"android.os.Debug", "anti-debug"},
-	{"/proc/self/maps", "anti-debug"},
-	{"SIGTRAP", "anti-debug"},
+	{"/system/bin/su", markerRoot},
+	{"/system/xbin/su", markerRoot},
+	{"com.topjohnwu.magisk", markerRoot},
+	{"com.noshufou.android.su", markerRoot},
+	{"test-keys", markerRoot},
+	{"superuser.apk", markerRoot},
+	{"ro.debuggable", markerEmulator},
+	{"ro.hardware", markerEmulator},
+	{"goldfish", markerEmulator},
+	{"ranchu", markerEmulator},
+	{"sdk_gphone", markerEmulator},
+	{"generic_x86", markerEmulator},
+	{markerTracerPid, markerAntiDebug},
+	{"/proc/self/status", markerAntiDebug},
+	{"ptrace", markerAntiDebug},
+	{markerIsDebuggerConnected, markerAntiDebug},
+	{markerAndroidDebug, markerAntiDebug},
+	{"/proc/self/maps", markerAntiDebug},
+	{"SIGTRAP", markerAntiDebug},
 }
 
 // elfAntiAnalysis scans the binary's printable strings for instrumentation
@@ -498,8 +501,8 @@ func elfAntiAnalysis(data []byte) []string {
 			continue
 		}
 		needle := []byte(marker.needle)
-		if marker.needle == "TracerPid" || marker.needle == "isDebuggerConnected" ||
-			marker.needle == "android.os.Debug" || marker.needle == "SIGTRAP" {
+		if marker.needle == markerTracerPid || marker.needle == markerIsDebuggerConnected ||
+			marker.needle == markerAndroidDebug || marker.needle == "SIGTRAP" {
 			// Case-sensitive markers.
 			if bytes.Contains(data, needle) {
 				seen[marker.label] = true
