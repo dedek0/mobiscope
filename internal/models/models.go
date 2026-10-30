@@ -32,6 +32,8 @@ type AnalysisSession struct {
 	// FindingsMapped is the number of findings whose obfuscated locations
 	// were rewritten through --mapping.
 	FindingsMapped int `json:"findings_mapped,omitempty"`
+	// AllowlistSuppressed is the number of findings removed by --allowlist.
+	AllowlistSuppressed int `json:"allowlist_suppressed,omitempty"`
 	// LLMCostUSD is the cumulative cost of LLM triage for this session (0
 	// when triage did not run).
 	LLMCostUSD float64 `json:"llm_cost_usd,omitempty"`

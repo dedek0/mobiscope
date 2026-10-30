@@ -105,6 +105,9 @@ before exposing the API.
 # Deobfuscate finding locations with the R8/ProGuard mapping
 ./bin/mobiscope analyze app.apk --mapping mapping.txt
 
+# Suppress documented exceptions (see docs/analyzers.md)
+./bin/mobiscope analyze app.apk --allowlist allowlist.yaml --fail-on high
+
 # Compare two builds (new/resolved/unchanged findings)
 ./bin/mobiscope diff old.apk new.apk
 ./bin/mobiscope diff old.apk new.apk --json diff.json

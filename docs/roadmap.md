@@ -194,9 +194,10 @@ decoded tree when the native parse fails. See
 - **Diff, baseline and CI gate.** (done) `mobiscope diff old.apk new.apk`
   with `--json`, `analyze --baseline <findings.json|session.json>` and
   `analyze --fail-on <severity>` (exit code 2). Matching is fingerprint-based
-  and line-number independent. A built-in allowlist now skips
-  AndroidX/library infrastructure components; a user-extensible allowlist for
-  public identifiers is still open.
+  and line-number independent. A built-in allowlist skips AndroidX/library
+  infrastructure components, and `--allowlist allowlist.yaml` accepts
+  user-extensible rules (each with a mandatory reason) for known public
+  identifiers.
 - **Validate stage names.** (done) An unknown `--stages` entry now fails the
   run with the valid names for the detected platform.
 
@@ -289,7 +290,7 @@ result is the decision input.
    finding origin.
 3. P2 diff/baseline/CI gate (done).
 4. P2 Kotlin/taint, signing parse, native depth and SDK detection (done).
-   Still open in P2: string-encryption/reflection detection, a user-extensible
-   allowlist and full v2/v3 signature verification.
+   Still open in P2: a dedicated string-encryption stage and full v2/v3
+   signature verification.
 5. Decompiler backend evaluation, then `--fast`.
 6. P3 performance/reporting.

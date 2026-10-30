@@ -195,9 +195,10 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - **Diff, baseline e gate de CI.** (feito) `mobiscope diff old.apk new.apk`
   com `--json`, `analyze --baseline <findings.json|session.json>` e
   `analyze --fail-on <severity>` (exit code 2). O casamento é por fingerprint
-  e independente de número de linha. Uma allowlist embutida agora ignora
-  componentes de infraestrutura AndroidX/bibliotecas; uma allowlist
-  extensível pelo usuário para identificadores públicos continua aberta.
+  e independente de número de linha. Uma allowlist embutida ignora
+  componentes de infraestrutura AndroidX/bibliotecas, e
+  `--allowlist allowlist.yaml` aceita regras extensíveis (cada uma com
+  `reason` obrigatório) para identificadores públicos conhecidos.
 - **Validar nomes de estágio.** (feito) Um `--stages` inválido agora falha
   listando os nomes válidos para a plataforma detectada.
 
@@ -290,7 +291,7 @@ entrada da decisão.
    targetSdk e origem do finding.
 3. P2 diff/baseline/gate de CI (feito).
 4. P2 Kotlin/taint, parse de assinatura, profundidade nativa e detecção de SDK
-   (feito). Continua aberto no P2: string encryption/reflection, allowlist
-   extensível e verificação completa de assinatura v2/v3.
+   (feito). Continua aberto no P2: estágio dedicado de string encryption e
+   verificação completa de assinatura v2/v3.
 5. Avaliação do backend de decompilação, depois `--fast`.
 6. P3 performance/relatório.

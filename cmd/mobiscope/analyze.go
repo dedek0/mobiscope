@@ -47,6 +47,7 @@ func newAnalyzeCmd() *cobra.Command {
 		failOn         string
 		baseline       string
 		mapping        string
+		allowlist      string
 	)
 
 	cmd := &cobra.Command{
@@ -120,6 +121,7 @@ func newAnalyzeCmd() *cobra.Command {
 					failOn:         failOn,
 					baseline:       baseline,
 					mapping:        mapping,
+					allowlist:      allowlist,
 					logger:         logger,
 					ctx:            ctx,
 				})
@@ -180,6 +182,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit with code 2 when a finding at or above this severity exists (critical|high|medium|low|info; off disables)")
 	cmd.Flags().StringVar(&baseline, "baseline", "", "Suppress findings that match a previous findings.json or session.json")
 	cmd.Flags().StringVar(&mapping, "mapping", "", "R8/ProGuard mapping.txt used to deobfuscate finding locations")
+	cmd.Flags().StringVar(&allowlist, "allowlist", "", "YAML allowlist of documented findings to suppress")
 
 	return cmd
 }
@@ -208,6 +211,7 @@ type targetFlags struct {
 	failOn         string
 	baseline       string
 	mapping        string
+	allowlist      string
 	logger         *slog.Logger
 	ctx            context.Context
 }
@@ -291,6 +295,19 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 		}
 	}
 
+	// Documented exceptions are applied before the baseline so a finding can
+	// be accepted for a reason rather than silently matched by fingerprint.
+	if tf.allowlist != "" {
+		if err := applyAllowlist(session, tf.allowlist, tf.logger); err != nil {
+			return session, fmt.Errorf("applying allowlist: %w", err)
+		}
+		if session.AllowlistSuppressed > 0 {
+			if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+				return session, fmt.Errorf("persisting allowlist results: %w", err)
+			}
+		}
+	}
+
 	// The baseline is applied before triage so known findings do not consume
 	// LLM budget.
 	if tf.baseline != "" {
@@ -345,6 +362,9 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	}
 	if session.FindingsMapped > 0 {
 		fmt.Fprintf(os.Stderr, "Mapped findings: %d\n", session.FindingsMapped)
+	}
+	if session.AllowlistSuppressed > 0 {
+		fmt.Fprintf(os.Stderr, "Allowlist suppressed: %d\n", session.AllowlistSuppressed)
 	}
 	if session.BaselineSuppressed > 0 {
 		fmt.Fprintf(os.Stderr, "Baseline suppressed: %d\n", session.BaselineSuppressed)

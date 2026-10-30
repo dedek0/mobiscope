@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mastg-reflection` / `mastg-string-encryption` semgrep rules.
 - A built-in allowlist skips exported AndroidX/library infrastructure
   components that are not app-specific attack surface.
+- `analyze --allowlist allowlist.yaml` suppresses documented exceptions by
+  tool/category/rule/title/file/evidence, with a mandatory reason per rule.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the

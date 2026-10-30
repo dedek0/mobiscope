@@ -86,8 +86,23 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
   the baseline removed them all). `off`/`none` disables the gate.
 - `analyze --mapping <mapping.txt>` rewrites obfuscated class paths in
   finding locations (and class names in evidence/description) through an
-  R8/ProGuard mapping, then re-clusters. It runs before `--baseline` and
-  triage; the count lands in `session.findings_mapped`.
+  R8/ProGuard mapping, then re-clusters. It runs before `--allowlist`,
+  `--baseline` and triage; the count lands in `session.findings_mapped`.
+- `analyze --allowlist <allowlist.yaml>` suppresses findings that match every
+  populated field of a rule. Every rule needs a `reason`; a rule with no
+  matching field is rejected. Fields: `tool`, `category`, `rule_id`, `title`,
+  `file`, `evidence`. Patterns accept `*`/`?`/`[]` (via `path.Match`) and a
+  leading `**/`; patterns without a wildcard match as substrings. The count
+  lands in `session.allowlist_suppressed`.
+
+  ```yaml
+  allow:
+    - reason: "Firebase API keys are public client identifiers"
+      category: secret
+      title: "*GCP API Key*"
+    - reason: "Generated BuildConfig constant"
+      file: "**/BuildConfig.java"
+  ```
 - Fingerprints ignore line numbers: semgrep findings use
   `source_tool|rule_id|file`; everything else uses
   `category|title|file|evidence`. A moved finding stays “unchanged”; a second
