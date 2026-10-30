@@ -169,8 +169,6 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   `assets/` é inspecionado; `DT_SONAME`, entropia de Shannon e assinaturas de
   packers (UPX, 360 Jiagu, Tencent Legu, Alibaba, Bangcle, …) entram em
   `native_libs`, com findings de `obfuscation` para alta entropia e packing.
-  Recuperar versão para OSV a partir de SONAME/nome do arquivo continua
-  aberto.
 - **Detecção de SDK.** (feito) As assinaturas cobrem Huawei HMS, WeChat,
   Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter, Unity,
   Apache HttpClient, Bouncy Castle, SQLCipher, ZXing e a stdlib Kotlin, além
@@ -183,15 +181,13 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   fingerprint SHA-256, subject, validade, algoritmo/tamanho de chave, presença
   de v1 e detecção de debug. Um artefato adulterado vira
   `digest-mismatch`/`invalid-signature`. Lineage de rotação e presença de
-  source stamp são detectados; validar as cadeias fica como hardening de P3.
-- **Estágio de obfuscação.** (parcial) O estágio `anti-analysis` detecta
-  artefatos R8/ProGuard/DexGuard, nomes curtos de classe e toolchain de
-  obfuscação, e `analyze --mapping mapping.txt` reescreve caminhos e nomes de
-  classe obfuscados nos findings antes de baseline/triage. Reflection e
-  decodificação Base64 em runtime agora são sinalizados pelo `anti-analysis`
-  e pelo semgrep (`mastg-reflection`, `mastg-string-encryption`). Continua
-  aberto: um estágio dedicado de string encryption e deobfuscação server-side
-  além do mapeamento de classe/arquivo.
+  source stamp são detectados.
+- **Estágio de obfuscação.** (feito no escopo P2) O estágio `anti-analysis`
+  detecta artefatos R8/ProGuard/DexGuard, nomes curtos de classe e toolchain
+  de obfuscação, e `analyze --mapping mapping.txt` reescreve caminhos e nomes
+  de classe obfuscados nos findings antes de baseline/triage. Reflection e
+  decodificação Base64 em runtime são sinalizados pelo `anti-analysis` e pelo
+  semgrep (`mastg-reflection`, `mastg-string-encryption`).
 - **Diff, baseline e gate de CI.** (feito) `mobiscope diff old.apk new.apk`
   com `--json`, `analyze --baseline <findings.json|session.json>` e
   `analyze --fail-on <severity>` (exit code 2). O casamento é por fingerprint
@@ -217,6 +213,10 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - Fixtures golden com os traps de falso positivo (PEM em código de parser,
   chaves Firebase, multidex, timestamp de zipalign) para travar o
   comportamento.
+- Profundidade de obfuscação: pontuar string encryption além da detecção de
+  Base64, deobfuscação server-side além do mapeamento de classe/arquivo e
+  validação das cadeias de rotação v3 e source stamp.
+- Recuperar versão de bibliotecas nativas via SONAME/nome do arquivo para OSV.
 
 ## Backends de decompilação
 
