@@ -73,8 +73,10 @@ RUN if [ "$IPSW_VERSION" != "v0.0.0" ]; then \
             | tar -xz -C /usr/local/bin ipsw; \
     fi
 
-# semgrep — pattern scanning (SARIF)
-RUN pip3 install --no-cache-dir "semgrep==1.127.1" \
+# semgrep — pattern scanning (SARIF). The pip bundled with jammy segfaults
+# while resolving semgrep's dependency tree, so upgrade pip first.
+RUN python3 -m pip install --upgrade --no-cache-dir pip \
+    && python3 -m pip install --no-cache-dir "semgrep==1.127.1" \
     && semgrep --version
 
 COPY --from=builder /mobiscope /usr/local/bin/mobiscope

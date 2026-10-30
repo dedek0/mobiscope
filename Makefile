@@ -36,7 +36,7 @@ GOLANGCI_LINT_VERSION ?= v2.13.2
 
 install-tools:
 	go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 check: fmt vet lint test
 
