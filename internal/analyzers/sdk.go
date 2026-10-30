@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -316,6 +317,7 @@ func DetectSDKs(target, workdir string) []models.SDK {
 
 	maven := mavenVersionsFromArchive(target)
 	resources := resourceVersions(workdir)
+	buildConfigs := buildConfigVersions(workdir)
 	for name, sdk := range found {
 		if v := maven[sdk.Group+":"+sdk.Artifact]; v != "" {
 			sdk.Version = v
@@ -330,6 +332,20 @@ func DetectSDKs(target, workdir string) []models.SDK {
 				sdk.Version = v
 				found[name] = sdk
 			}
+		}
+	}
+	for name, sdk := range found {
+		if sdk.Version != "" {
+			continue
+		}
+		if v := buildConfigVersionFor(buildConfigs, sdk.Group); v != "" {
+			sdk.Version = v
+			found[name] = sdk
+		}
+	}
+	for _, sdk := range nativeSDKsFromArchive(target) {
+		if _, ok := found[sdk.Name]; !ok {
+			found[sdk.Name] = sdk
 		}
 	}
 
@@ -438,6 +454,133 @@ func pomProperty(content, key string) string {
 		}
 	}
 	return ""
+}
+
+const maxBuildConfigFiles = 2000
+
+var (
+	buildConfigPackageRe = regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z0-9_.]+)`)
+	buildConfigVersionRe = regexp.MustCompile(`(?m)\b(?:VERSION|VERSION_NAME|VERSION_STRING)\b\s*(?::\s*String\s*)?[=:]\s*"([^"]+)"`)
+)
+
+// buildConfigVersions recovers library versions from decompiled BuildConfig
+// classes, mapping the Java package to the VERSION constant.
+func buildConfigVersions(workdir string) map[string]string {
+	out := map[string]string{}
+	scanned := 0
+	for _, root := range []string{
+		filepath.Join(workdir, "jadx", "sources"),
+		filepath.Join(workdir, "jadx"),
+	} {
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || d.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			base := d.Name()
+			if base != "BuildConfig.java" && base != "BuildConfig.kt" {
+				return nil
+			}
+			if scanned >= maxBuildConfigFiles {
+				return filepath.SkipAll
+			}
+			data, err := readFileCapped(p, maxManifestBytes)
+			if err != nil {
+				return nil
+			}
+			scanned++
+			content := string(data)
+			pkg := buildConfigPackageRe.FindStringSubmatch(content)
+			version := buildConfigVersionRe.FindStringSubmatch(content)
+			if pkg == nil || version == nil || !versionLike(version[1]) {
+				return nil
+			}
+			if _, exists := out[pkg[1]]; !exists {
+				out[pkg[1]] = version[1]
+			}
+			return nil
+		})
+		if len(out) > 0 {
+			break
+		}
+	}
+	return out
+}
+
+// buildConfigVersionFor finds the longest package prefix that matches an SDK
+// group.
+func buildConfigVersionFor(versions map[string]string, group string) string {
+	if group == "" {
+		return ""
+	}
+	if v, ok := versions[group]; ok {
+		return v
+	}
+	bestPkg, bestVersion := "", ""
+	for pkg, version := range versions {
+		if !strings.HasPrefix(group, pkg+".") && !strings.HasPrefix(pkg, group+".") {
+			continue
+		}
+		if len(pkg) > len(bestPkg) {
+			bestPkg, bestVersion = pkg, version
+		}
+	}
+	return bestVersion
+}
+
+// nativeSDKsFromArchive recognises libraries that are only visible as native
+// binaries (no DEX classes).
+func nativeSDKsFromArchive(target string) []models.SDK {
+	zr, err := openZip(target)
+	if err != nil {
+		return nil
+	}
+	defer zr.Close()
+
+	specs := []struct {
+		name     string
+		group    string
+		artifact string
+		libs     []string
+	}{
+		{"Flutter", "io.flutter", "flutter", []string{"libflutter.so"}},
+		{"Unity", "com.unity3d", "unity-runtime", []string{"libunity.so", "libil2cpp.so"}},
+		{"React Native", "com.facebook.react", "react-native", []string{"libreactnativejni.so"}},
+		{"Hermes JS Engine", "com.facebook.hermes", "hermes", []string{"libhermes.so"}},
+	}
+
+	found := map[string]models.SDK{}
+	for _, f := range zr.File {
+		base := strings.ToLower(filepath.Base(f.Name))
+		for _, spec := range specs {
+			if _, exists := found[spec.name]; exists {
+				continue
+			}
+			for _, lib := range spec.libs {
+				if base == lib {
+					found[spec.name] = models.SDK{
+						Name:       spec.name,
+						Group:      spec.group,
+						Artifact:   spec.artifact,
+						Package:    spec.group + ":" + spec.artifact,
+						Evidence:   f.Name,
+						Confidence: 0.85,
+					}
+					break
+				}
+			}
+		}
+	}
+
+	out := make([]models.SDK, 0, len(found))
+	for _, sdk := range found {
+		out = append(out, sdk)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // resourceVersions reads the decoded string resources of the session and

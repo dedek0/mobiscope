@@ -3,6 +3,7 @@ package analyzers
 import (
 	"archive/zip"
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -23,6 +24,14 @@ import (
 // testCertificate generates a self-signed certificate for the signing tests.
 func testCertificate(t *testing.T) ([]byte, *x509.Certificate) {
 	t.Helper()
+	der, cert, _ := testCertificateWithKey(t)
+	return der, cert
+}
+
+// testCertificateWithKey also returns the private key so a test can produce a
+// valid signature.
+func testCertificateWithKey(t *testing.T) ([]byte, *x509.Certificate, *rsa.PrivateKey) {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	template := &x509.Certificate{
@@ -35,7 +44,145 @@ func testCertificate(t *testing.T) ([]byte, *x509.Certificate) {
 	require.NoError(t, err)
 	cert, err := x509.ParseCertificate(der)
 	require.NoError(t, err)
-	return der, cert
+	return der, cert, key
+}
+
+// lpWithAlg builds a uint32 algorithm id followed by a length-prefixed value.
+func lpWithAlg(id uint32, value []byte) []byte {
+	out := make([]byte, 8+len(value))
+	binary.LittleEndian.PutUint32(out, id)
+	binary.LittleEndian.PutUint32(out[4:], uint32(len(value)))
+	copy(out[8:], value)
+	return out
+}
+
+// buildV2Value assembles the value of a v2 ID-value pair for one signer.
+func buildV2Value(certDER, publicKeyDER, digest, signature []byte) []byte {
+	digests := lp(lpWithAlg(0x0102, digest))
+	certs := lp(lp(certDER))
+	signedData := append(append(digests, certs...), lp(nil)...)
+
+	signatures := lp(lpWithAlg(0x0102, signature))
+	signer := append(lp(signedData), signatures...)
+	signer = append(signer, lp(publicKeyDER)...)
+	return lp(signer)
+}
+
+// buildSigningBlock wraps a v2 value in the APK Signing Block framing.
+func buildSigningBlock(value []byte) []byte {
+	pair := make([]byte, 8+4+len(value))
+	binary.LittleEndian.PutUint64(pair, uint64(4+len(value)))
+	binary.LittleEndian.PutUint32(pair[8:], sigBlockV2)
+	copy(pair[12:], value)
+
+	block := make([]byte, 8+len(pair)+8+16)
+	binary.LittleEndian.PutUint64(block, uint64(len(block)-8))
+	copy(block[8:], pair)
+	binary.LittleEndian.PutUint64(block[8+len(pair):], uint64(len(block)-8))
+	copy(block[len(block)-16:], apkSigBlockMagic)
+	return block
+}
+
+// testContentDigest recomputes the v2 content digest the same way the
+// verifier does.
+func testContentDigest(prefix, centralDir, eocd []byte, blockOffset int) []byte {
+	var chunkDigests []byte
+	chunks := uint32(0)
+	add := func(chunk []byte) {
+		h := sha256.New()
+		h.Write([]byte{0x5a})
+		var b [4]byte
+		binary.LittleEndian.PutUint32(b[:], uint32(len(chunk)))
+		h.Write(b[:])
+		h.Write(chunk)
+		chunkDigests = append(chunkDigests, h.Sum(nil)...)
+		chunks++
+	}
+	addSection := func(data []byte) {
+		for len(data) > 0 {
+			n := len(data)
+			if n > 1<<20 {
+				n = 1 << 20
+			}
+			add(data[:n])
+			data = data[n:]
+		}
+	}
+	addSection(prefix)
+	addSection(centralDir)
+	patched := append([]byte(nil), eocd...)
+	binary.LittleEndian.PutUint32(patched[16:], uint32(blockOffset))
+	addSection(patched)
+
+	h := sha256.New()
+	h.Write([]byte{0x5a})
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], chunks)
+	h.Write(b[:])
+	h.Write(chunkDigests)
+	return h.Sum(nil)
+}
+
+// writeValidSignedAPK writes an APK with a correctly signed v2 block.
+func writeValidSignedAPK(t *testing.T) string {
+	t.Helper()
+	certDER, _, key := testCertificateWithKey(t)
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("AndroidManifest.xml")
+	require.NoError(t, err)
+	_, err = w.Write([]byte(`<manifest package="com.example.signed"/>`))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	data := buf.Bytes()
+
+	eocdIndex := bytes.LastIndex(data, []byte("PK\x05\x06"))
+	require.Greater(t, eocdIndex, 0)
+	cdOffset := int(binary.LittleEndian.Uint32(data[eocdIndex+16:]))
+	eocdOffset := eocdIndex
+	prefix := data[:cdOffset]
+	centralDir := data[cdOffset:eocdOffset]
+	eocd := append([]byte(nil), data[eocdOffset:]...)
+
+	blockOffset := len(prefix)
+	digest := testContentDigest(prefix, centralDir, eocd, blockOffset)
+	value := buildV2Value(certDER, publicKeyDER, digest, make([]byte, 256))
+	block := buildSigningBlock(value)
+
+	// Sign the actual signed data (the digest/signature lengths are now fixed).
+	_ = block
+	signedData := signedDataFromValue(t, value)
+	hash := sha256.Sum256(signedData)
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])
+	require.NoError(t, err)
+	value = buildV2Value(certDER, publicKeyDER, digest, signature)
+	block = buildSigningBlock(value)
+	require.Equal(t, len(value), len(buildV2Value(certDER, publicKeyDER, digest, make([]byte, 256))))
+	_ = block
+
+	finalEOCD := append([]byte(nil), eocd...)
+	binary.LittleEndian.PutUint32(finalEOCD[16:], uint32(cdOffset+len(block)))
+	out := append([]byte(nil), prefix...)
+	out = append(out, block...)
+	out = append(out, centralDir...)
+	out = append(out, finalEOCD...)
+
+	path := filepath.Join(t.TempDir(), "valid.apk")
+	require.NoError(t, os.WriteFile(path, out, 0o600))
+	return path
+}
+
+// signedDataFromValue extracts the first signer's signed data.
+func signedDataFromValue(t *testing.T, value []byte) []byte {
+	t.Helper()
+	signers, _, ok := readLengthPrefixed(value)
+	require.True(t, ok)
+	signedData, _, ok := readLengthPrefixed(signers)
+	require.True(t, ok)
+	return signedData
 }
 
 func lp(value []byte) []byte {
@@ -172,4 +319,31 @@ func TestReadAPKSigningBlock_NoBlock(t *testing.T) {
 	pairs, err := readAPKSigningBlock(path)
 	require.NoError(t, err)
 	assert.Empty(t, pairs)
+}
+
+func TestInspectAPKSigningMaterial_VerifiedV2(t *testing.T) {
+	path := writeValidSignedAPK(t)
+	info, err := inspectAPKSigningMaterial(path)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", info.Scheme)
+	assert.True(t, info.Verified, "verification note: %s", info.Verification)
+	assert.Equal(t, "verified", info.Verification)
+	assert.Equal(t, 1, info.SignerCount)
+	assert.NotEmpty(t, info.CertFP)
+}
+
+func TestInspectAPKSigningMaterial_TamperedV2(t *testing.T) {
+	path := writeValidSignedAPK(t)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	// Flip a byte in the ZIP content, which is covered by the content digest
+	// but not by the central directory.
+	data[32] ^= 0xff
+	tampered := filepath.Join(t.TempDir(), "tampered.apk")
+	require.NoError(t, os.WriteFile(tampered, data, 0o600))
+
+	info, err := inspectAPKSigningMaterial(tampered)
+	require.NoError(t, err)
+	assert.False(t, info.Verified)
+	assert.Equal(t, "digest-mismatch", info.Verification)
 }

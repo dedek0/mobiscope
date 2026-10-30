@@ -63,7 +63,13 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 
 	var scheme, certFP, signerCount, debug string
 	source := "in-process"
+	verified := false
+	verificationNote := ""
 	material, materialErr := inspectAPKSigningMaterial(target)
+	if materialErr == nil {
+		verified = material.Verified
+		verificationNote = material.Verification
+	}
 
 	if CheckBinary(apksignerBinary) == nil {
 		cmdRes, err := a.runner.Run(ctx, apksignerBinary, []string{
@@ -72,7 +78,9 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 		if cmdRes != nil {
 			scheme, certFP, signerCount, debug = parseApksignerOutput(cmdRes.Stdout + cmdRes.Stderr)
 			if scheme != "" {
-				source = "apksigner"
+				source = apksignerName
+				verified = true
+				verificationNote = "apksigner"
 			}
 		}
 		if err != nil {
@@ -101,16 +109,20 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 	}
 
 	raw, _ := json.Marshal(map[string]interface{}{
-		"signature_scheme": scheme,
-		"signing_cert_fp":  certFP,
-		"signer_count":     signerCount,
-		"debug_signed":     debug == boolTrue || strings.Contains(strings.ToLower(debug), "debug"),
-		"signing_source":   source,
-		"cert_subject":     material.CertSubject,
-		"cert_not_before":  formatSigningTime(material.CertNotFrom),
-		"cert_not_after":   formatSigningTime(material.CertNotTo),
-		"key_algorithm":    material.KeyAlg,
-		"key_bits":         material.KeyBits,
+		"signature_scheme":   scheme,
+		"signing_cert_fp":    certFP,
+		"signer_count":       signerCount,
+		"debug_signed":       debug == boolTrue || strings.Contains(strings.ToLower(debug), "debug"),
+		"signing_source":     source,
+		"cert_subject":       material.CertSubject,
+		"cert_not_before":    formatSigningTime(material.CertNotFrom),
+		"cert_not_after":     formatSigningTime(material.CertNotTo),
+		"key_algorithm":      material.KeyAlg,
+		"key_bits":           material.KeyBits,
+		"signature_verified": verified,
+		"verification_note":  verificationNote,
+		"rotation":           material.Rotation,
+		"source_stamp":       material.SourceStamp,
 	})
 	result.Output = raw
 	result.Duration = time.Since(start)
@@ -119,16 +131,20 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 
 // apksignerOutput is the JSON shape written by ApkSigner.Run.
 type apksignerOutput struct {
-	SignatureScheme string `json:"signature_scheme"`
-	SigningCertFP   string `json:"signing_cert_fp"`
-	SignerCount     string `json:"signer_count"`
-	DebugSigned     bool   `json:"debug_signed"`
-	SigningSource   string `json:"signing_source,omitempty"`
-	CertSubject     string `json:"cert_subject,omitempty"`
-	CertNotBefore   string `json:"cert_not_before,omitempty"`
-	CertNotAfter    string `json:"cert_not_after,omitempty"`
-	KeyAlgorithm    string `json:"key_algorithm,omitempty"`
-	KeyBits         int    `json:"key_bits,omitempty"`
+	SignatureScheme   string `json:"signature_scheme"`
+	SigningCertFP     string `json:"signing_cert_fp"`
+	SignerCount       string `json:"signer_count"`
+	DebugSigned       bool   `json:"debug_signed"`
+	SigningSource     string `json:"signing_source,omitempty"`
+	CertSubject       string `json:"cert_subject,omitempty"`
+	CertNotBefore     string `json:"cert_not_before,omitempty"`
+	CertNotAfter      string `json:"cert_not_after,omitempty"`
+	KeyAlgorithm      string `json:"key_algorithm,omitempty"`
+	KeyBits           int    `json:"key_bits,omitempty"`
+	SignatureVerified bool   `json:"signature_verified"`
+	VerificationNote  string `json:"verification_note,omitempty"`
+	Rotation          bool   `json:"rotation,omitempty"`
+	SourceStamp       bool   `json:"source_stamp,omitempty"`
 }
 
 // ConvertApkSignerFindings reports signature-level issues.
@@ -184,6 +200,11 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 			fmt.Sprintf("The signing certificate uses a %d-bit RSA key; 2048 bits or more is the current minimum.", out.KeyBits),
 			fmt.Sprintf("key_algorithm=%s key_bits=%d", out.KeyAlgorithm, out.KeyBits),
 			models.SeverityMedium, models.SensitivityInternal, 0.8)
+	}
+	if !out.SignatureVerified && (out.VerificationNote == "digest-mismatch" || out.VerificationNote == "invalid-signature") {
+		add("APK signature verification failed",
+			fmt.Sprintf("The in-process verifier rejected the v2/v3 signature (%s): the signed content does not match the certificate. Treat the artifact as tampered and confirm with apksigner on a trusted host.", out.VerificationNote),
+			"verification="+out.VerificationNote, models.SeverityHigh, models.SensitivityConfidential, 0.8)
 	}
 	return findings
 }

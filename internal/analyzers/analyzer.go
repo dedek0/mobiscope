@@ -106,12 +106,12 @@ type DefaultCommandRunner struct{}
 // execute. Anything else is rejected so a PATH hijack cannot run arbitrary
 // binaries through the analyzer pipeline.
 var allowedBinaries = map[string]struct{}{
-	apktoolBinary:  {},
-	jadxBinary:     {},
-	gitleaksBinary: {},
-	semgrepBinary:  {},
-	"java":         {},
-	"apksigner":    {},
+	apktoolBinary:   {},
+	jadxBinary:      {},
+	gitleaksBinary:  {},
+	semgrepBinary:   {},
+	"java":          {},
+	apksignerBinary: {},
 }
 
 // ErrBinaryNotAllowed is returned when a command name is not on the allowlist.

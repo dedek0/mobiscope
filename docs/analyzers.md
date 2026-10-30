@@ -158,7 +158,10 @@ Details and known gaps:
   normalized ZIP timestamp are normal and are not reported. Findings are
   `manifest_issue`; the converter is wired into the pipeline.
 - **sdk** — recognises third-party libraries from DEX class prefixes and
-  recovers versions from decoded resources. Feeds `inventory.json.sdks`,
+  from native-only markers (`libflutter.so`, `libunity.so`, `libil2cpp.so`,
+  `libreactnativejni.so`, `libhermes.so`). Versions come from
+  `META-INF/maven/*/pom.properties`, decoded string resources or decompiled
+  `BuildConfig` classes. Feeds `inventory.json.sdks`,
   which is what `--osv` looks up, and emits one informational
   `manifest_issue` finding per library.
 - **gitleaks** — exit `0` (clean) and `1` (leaks found) are success;
@@ -225,9 +228,11 @@ Details and known gaps:
   (including the Docker image), the in-process parser (`signing.go`) reads the
   APK Signing Block v2/v3/v3.1, extracts the signer certificate (SHA-256
   fingerprint, subject, validity, key algorithm/size), combines it with the
-  v1 `META-INF/*.RSA|DSA|EC` presence, and reports the scheme. It is a parse,
-  not a cryptographic verification: `apksigner` remains the verifier when
-  available, and the v2/v3 digests are not recomputed yet.
+  v1 `META-INF/*.RSA|DSA|EC` presence, and reports the scheme. It also
+  verifies the v2/v3 signature and the APK content digest (chunked SHA-256 or
+  SHA-512 depending on the algorithm), so a tampered artifact is reported as
+  `digest-mismatch`/`invalid-signature`. The v3 rotation lineage and source
+  stamp are detected; their cryptographic chains are not validated yet.
 
 ## iOS stages
 

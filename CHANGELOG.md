@@ -34,16 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before triage.
 - `mobiscope diff <old> <new>` with `--json <path>`, matching findings by a
   line-independent fingerprint (new/resolved/unchanged).
-- In-process APK signing-block parser: v2/v3/v3.1 scheme, signer certificate
-  SHA-256 fingerprint, subject, validity and key size, plus v1 presence and
-  debug detection. New findings for an expired signing certificate and a
-  weak RSA key.
+- In-process APK signing-block parser and cryptographic verifier: v2/v3/v3.1
+  signature and chunked content digest (SHA-256/SHA-512), scheme, signer
+  certificate SHA-256 fingerprint, subject, validity and key size, plus v1
+  presence, debug detection, rotation/source-stamp presence. New findings for
+  a failed signature check, an expired signing certificate and a weak RSA key.
 - Native depth: `.so` files under `assets/`, `DT_SONAME`, Shannon entropy,
   packer signatures and `RegisterNatives` detection.
 - More SDK signatures: Huawei HMS, WeChat, Bugly, MMKV, Alipay, Umeng, JPush,
   Baidu, Play Billing, Flutter, Unity, Apache HttpClient, Bouncy Castle,
   SQLCipher, ZXing and the Kotlin stdlib. Versions are recovered from
-  `META-INF/maven/*/pom.properties` as well as decoded string resources.
+  `META-INF/maven/*/pom.properties`, decoded string resources and decompiled
+  `BuildConfig` classes; native-only SDKs are detected from `.so` names.
 - Semgrep Android pack: Kotlin rules plus taint-mode coverage for
   intent/deeplink → WebView, SQL, file and exec, clipboard → log and intent
   redirection; `ContentProvider.openFile` traversal and a tightened mutable

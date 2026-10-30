@@ -36,8 +36,8 @@ Pontos fortes:
 - Findings determinísticos, dedup/clustering, SARIF e Markdown.
 - Triage por LLM provider-agnostic com gate local para secrets.
 
-As lacunas estão agrupadas abaixo. P0, P1 e a maior parte do P2 estão
-implementados; os itens restantes do P2 e o P3 são o plano.
+As lacunas estão agrupadas abaixo. P0, P1 e P2 estão implementados; o P3 é o
+plano.
 
 ## P0 — qualidade do sinal (feito)
 
@@ -156,7 +156,7 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
    campo para findings de semgrep/gitleaks, então “OkHttp menciona
    X509TrustManager” e “o app desativa validação de TLS” ficam distinguíveis.
 
-## P2 — cobertura (quase concluído)
+## P2 — cobertura (feito)
 
 - **Kotlin e taint.** (feito) O pack ganhou regras Kotlin (segredos
   hardcoded, `addJavascriptInterface`, log sensível, cifras fracas,
@@ -171,20 +171,19 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   `native_libs`, com findings de `obfuscation` para alta entropia e packing.
   Recuperar versão para OSV a partir de SONAME/nome do arquivo continua
   aberto.
-- **Detecção de SDK.** (parcial) As assinaturas agora cobrem Huawei HMS,
-  WeChat, Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter,
-  Unity, Apache HttpClient, Bouncy Castle, SQLCipher, ZXing e a stdlib Kotlin,
-  além do conjunto Firebase/OkHttp/Gson. As versões agora vêm de
-  `META-INF/maven/*/pom.properties` (coordenadas group/artifact exatas) e dos
-  string resources decodificados; recuperar via `BuildConfig` e SDKs
-  native-only continua aberto.
-- **Assinatura em Go.** (parse feito) O APK Signing Block v2/v3/v3.1 é lido
-  in-process: scheme, número de signers, fingerprint SHA-256 do certificado,
-  subject, validade e algoritmo/tamanho de chave, além da presença de v1 e
-  detecção de debug. A imagem Docker não depende mais de um palpite de
-  META-INF. Continua aberto: recalcular os digests v2/v3 (verificação
-  criptográfica), lineage de rotação, source stamp e atributos de rotação do
-  v3.1.
+- **Detecção de SDK.** (feito) As assinaturas cobrem Huawei HMS, WeChat,
+  Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter, Unity,
+  Apache HttpClient, Bouncy Castle, SQLCipher, ZXing e a stdlib Kotlin, além
+  do conjunto Firebase/OkHttp/Gson. Versões vêm de
+  `META-INF/maven/*/pom.properties`, string resources decodificados e classes
+  `BuildConfig`; SDKs native-only são detectados pelo nome do `.so`.
+- **Assinatura em Go.** (feito) O APK Signing Block v2/v3/v3.1 é lido e
+  verificado criptograficamente in-process: assinatura sobre o signed data,
+  digest de conteúdo em chunks (SHA-256/SHA-512), scheme, número de signers,
+  fingerprint SHA-256, subject, validade, algoritmo/tamanho de chave, presença
+  de v1 e detecção de debug. Um artefato adulterado vira
+  `digest-mismatch`/`invalid-signature`. Lineage de rotação e presença de
+  source stamp são detectados; validar as cadeias fica como hardening de P3.
 - **Estágio de obfuscação.** (parcial) O estágio `anti-analysis` detecta
   artefatos R8/ProGuard/DexGuard, nomes curtos de classe e toolchain de
   obfuscação, e `analyze --mapping mapping.txt` reescreve caminhos e nomes de
@@ -291,8 +290,7 @@ entrada da decisão.
 2. P1 (feito) — parse nativo de manifest/DEX, NSC completo, checks de
    targetSdk e origem do finding.
 3. P2 diff/baseline/gate de CI (feito).
-4. P2 Kotlin/taint, parse de assinatura, profundidade nativa e detecção de SDK
-   (feito). Continua aberto no P2: estágio dedicado de string encryption e
-   verificação completa de assinatura v2/v3.
+4. P2 Kotlin/taint, verificação de assinatura, profundidade nativa e
+   detecção de SDK (feito).
 5. Avaliação do backend de decompilação, depois `--fast`.
 6. P3 performance/relatório.
