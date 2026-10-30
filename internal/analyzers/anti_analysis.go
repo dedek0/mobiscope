@@ -383,6 +383,22 @@ var antiAnalysisPatterns = []antiMarkerPattern{
 	},
 
 	{
+		needle: "Class.forName", kind: markerReflection, title: "App loads classes reflectively", sev: models.SeverityLow,
+		desc: "The app resolves classes by name at runtime; reflection is commonly used to hide call graphs from static analysis.",
+	},
+	{
+		needle: "getDeclaredMethod", kind: markerReflection, title: "App looks up methods reflectively", sev: models.SeverityLow,
+		desc: "Reflective method lookup hides Java-to-Java calls from a static review and is a common obfuscation technique.",
+	},
+	{
+		needle: "Method.invoke", kind: markerReflection, title: "App invokes methods reflectively", sev: models.SeverityLow,
+		desc: "Reflective invocation hides the concrete call target from a static review.",
+	},
+	{
+		needle: "new String(Base64.decode", kind: "string-obfuscation", title: "App decodes strings at runtime", sev: models.SeverityInfo,
+		desc: "A Base64-decoded string is materialized at runtime; that is a common way to keep literals out of the static string pool.",
+	},
+	{
 		needle: "getPackageInfo", kind: markerIntegrity, title: titleIntegrityCheck, sev: models.SeverityInfo,
 		desc: "The app reads a package signature, the usual way to detect a repackaged build.",
 	},

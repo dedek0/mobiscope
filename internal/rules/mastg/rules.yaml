@@ -708,3 +708,36 @@ rules:
       mastg: [MASTG-TEST-0011]
       reference: https://mas.owasp.org/MASWE/MASWE-0007/
 
+
+  - id: mastg-reflection
+    patterns:
+      - pattern-either:
+          - pattern: Class.forName(...)
+          - pattern: $C.getDeclaredMethod(...)
+          - pattern: $C.getMethod(...)
+          - pattern: $M.invoke(...)
+    message: Reflective class/method loading hides the call graph from static analysis; confirm the target is not attacker-controlled.
+    severity: WARNING
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-RESILIENCE-1
+      mastg: [MASTG-TEST-0073]
+      reference: https://mas.owasp.org/MASWE/MASWE-0058/
+
+  - id: mastg-string-encryption
+    patterns:
+      - pattern-either:
+          - pattern: new String(Base64.decode(...))
+          - pattern: String(Base64.decode(...))
+          - pattern: $X.decode(Base64.decode(...))
+    message: A string is decoded from Base64 at runtime; confirm this is not string obfuscation hiding credentials or endpoints.
+    severity: INFO
+    languages: [java, kotlin]
+    metadata:
+      category: obfuscation
+      severity: INFO
+      masvs: MASVS-RESILIENCE-1
+      mastg: [MASTG-TEST-0073]
+      reference: https://mas.owasp.org/MASWE/MASWE-0058/

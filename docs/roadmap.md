@@ -186,9 +186,11 @@ decoded tree when the native parse fails. See
 - **Obfuscation stage.** (partially done) The anti-analysis stage detects
   R8/ProGuard/DexGuard artifacts, short class names and obfuscation tooling,
   and `analyze --mapping mapping.txt` rewrites obfuscated class paths and
-  class names in findings before baseline/triage. Still open: a dedicated
-  string-encryption/reflection stage and server-side deobfuscation beyond the
-  class/file mapping.
+  class names in findings before baseline/triage. Reflection and runtime
+  Base64 string decoding are now flagged by both `anti-analysis` and semgrep
+  (`mastg-reflection`, `mastg-string-encryption`). Still open: a dedicated
+  string-encryption stage and server-side deobfuscation beyond the class/file
+  mapping.
 - **Diff, baseline and CI gate.** (done) `mobiscope diff old.apk new.apk`
   with `--json`, `analyze --baseline <findings.json|session.json>` and
   `analyze --fail-on <severity>` (exit code 2). Matching is fingerprint-based

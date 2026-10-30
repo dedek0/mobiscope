@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PendingIntent` rule. 41 rules total, validated during the Docker build.
 - `analyze --mapping mapping.txt` deobfuscates finding locations and class
   names through an R8/ProGuard mapping before baseline/triage.
+- Reflection (`Class.forName`, reflective method lookup/invoke) and runtime
+  Base64 string decoding are flagged by `anti-analysis` and by the new
+  `mastg-reflection` / `mastg-string-encryption` semgrep rules.
 - A built-in allowlist skips exported AndroidX/library infrastructure
   components that are not app-specific attack surface.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not

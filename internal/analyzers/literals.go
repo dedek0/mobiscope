@@ -17,6 +17,7 @@ const (
 	markerXposed      = "xposed"
 	markerSubstrate   = "substrate"
 	markerDynamicCode = "dynamic-code"
+	markerReflection  = "reflection"
 	markerIntegrity   = "integrity"
 
 	// Anti-analysis finding titles.

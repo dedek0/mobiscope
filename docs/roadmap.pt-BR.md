@@ -187,9 +187,11 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - **Estágio de obfuscação.** (parcial) O estágio `anti-analysis` detecta
   artefatos R8/ProGuard/DexGuard, nomes curtos de classe e toolchain de
   obfuscação, e `analyze --mapping mapping.txt` reescreve caminhos e nomes de
-  classe obfuscados nos findings antes de baseline/triage. Continua aberto:
-  um estágio dedicado de string encryption/reflection e deobfuscação
-  server-side além do mapeamento de classe/arquivo.
+  classe obfuscados nos findings antes de baseline/triage. Reflection e
+  decodificação Base64 em runtime agora são sinalizados pelo `anti-analysis`
+  e pelo semgrep (`mastg-reflection`, `mastg-string-encryption`). Continua
+  aberto: um estágio dedicado de string encryption e deobfuscação server-side
+  além do mapeamento de classe/arquivo.
 - **Diff, baseline e gate de CI.** (feito) `mobiscope diff old.apk new.apk`
   com `--json`, `analyze --baseline <findings.json|session.json>` e
   `analyze --fail-on <severity>` (exit code 2). O casamento é por fingerprint

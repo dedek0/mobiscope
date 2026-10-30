@@ -131,9 +131,10 @@ Details and known gaps:
   `anti-analysis` stage now flags `RegisterNatives`.
 - **anti-analysis** — parses the DEX class names to score obfuscation and
   scans DEX/executable assets (`.dex`, `.jar`, `.so`, `.apk`) for
-  root/emulator, anti-debug, instrumentation (Frida/Xposed) and
-  dynamic-code-loading markers. Data assets (Unity metadata, models, fonts)
-  are ignored to avoid generic-word false positives. Emits `anti_analysis`
+  root/emulator, anti-debug, instrumentation (Frida/Xposed),
+  dynamic-code-loading, reflection and runtime string-decoding markers. Data
+  assets (Unity metadata, models, fonts) are ignored to avoid generic-word
+  false positives. Emits `anti_analysis`
   and `obfuscation` findings and fills `inventory.json.obfuscation` (score,
   class count, toolchain).
 - **repack** — reports a certificate that does not match `--expect-cert`,
@@ -152,10 +153,10 @@ Details and known gaps:
   rule's tags (untagged defaults to `critical`), confidence from entropy.
   Findings are marked `needs_llm_triage` + `representative`.
 - **semgrep** — rules from the embedded pack (`internal/rules/mastg/rules.yaml`,
-  41 rules: Java, Kotlin plus taint-mode rules for intent/deeplink → WebView,
-  SQL, file/exec, clipboard → log and intent redirection); the pack is
-  validated with `semgrep --validate` during the Docker image build. Severity
-  is the SARIF
+  43 rules: Java, Kotlin plus taint-mode rules for intent/deeplink → WebView,
+  SQL, file/exec, clipboard → log, intent redirection, reflection and
+  runtime Base64 string decoding); the pack is validated with
+  `semgrep --validate` during the Docker image build. Severity is the SARIF
   level (`error->critical`, `warning->medium`, `note/info->info`, else
   `low`), category from rule metadata with rule-id heuristics as fallback,
   confidence fixed `0.8`; `masvs`/`mastg`/`cwe` are read from the SARIF

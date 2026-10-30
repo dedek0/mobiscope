@@ -133,6 +133,8 @@ func TestRulePacks_ExpectedRuleIDs(t *testing.T) {
 		"mastg-taint-clipboard-to-log",
 		"mastg-taint-intent-redirection",
 		"mastg-contentprovider-openfile-traversal",
+		"mastg-reflection",
+		"mastg-string-encryption",
 	} {
 		assert.Contains(t, ids, want)
 	}
