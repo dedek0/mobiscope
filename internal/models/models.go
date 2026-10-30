@@ -26,6 +26,9 @@ type AnalysisSession struct {
 	// list means the report is partial even when the status is completed.
 	FailedTools []string `json:"failed_tools,omitempty"`
 	Summary     string   `json:"summary,omitempty"`
+	// BaselineSuppressed is the number of findings removed because they
+	// matched a --baseline file.
+	BaselineSuppressed int `json:"baseline_suppressed,omitempty"`
 	// LLMCostUSD is the cumulative cost of LLM triage for this session (0
 	// when triage did not run).
 	LLMCostUSD float64 `json:"llm_cost_usd,omitempty"`

@@ -49,7 +49,8 @@ Pipeline handling: an analyzer error is logged, recorded in
 in registration order and the first error (registration order) is kept.
 `--fail-fast` marks the session failed and makes `Run` return that error, and
 `cmd/mobiscope/main.go:classifyExit` maps process exits to 0 (ok), 1 (error),
-4 (LLM policy/provider) — a separate concern from tool exit codes.
+2 (`--fail-on` findings gate), 4 (LLM policy/provider) — a separate concern
+from tool exit codes.
 
 ## Consequences
 
@@ -84,4 +85,4 @@ in registration order and the first error (registration order) is kept.
 - internal/analyzers/semgrep.go, apktool.go, jadx.go (per-tool handling)
 - internal/analyzers/helpers_test.go (MockCommandRunner)
 - internal/pipeline/pipeline.go (error collection, fail-fast)
-- cmd/mobiscope/main.go (classifyExit: 0/1/4)
+- cmd/mobiscope/main.go (classifyExit: 0/1/2/4)

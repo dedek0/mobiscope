@@ -95,6 +95,16 @@ before exposing the API.
 
 # Abort on first tool error; run N tools at a time
 ./bin/mobiscope analyze app.apk --fail-fast --max-concurrency 2
+
+# CI gate: exit 2 when a high/critical finding exists
+./bin/mobiscope analyze app.apk --fail-on high
+
+# Suppress findings already present in a previous report
+./bin/mobiscope analyze app.apk --baseline previous/findings.json --fail-on high
+
+# Compare two builds (new/resolved/unchanged findings)
+./bin/mobiscope diff old.apk new.apk
+./bin/mobiscope diff old.apk new.apk --json diff.json
 ```
 
 ### LLM management
@@ -263,6 +273,7 @@ mobiscope is a **static** analysis harness. Deliberate non-goals:
 - Cloud providers **disabled by default** (`allow_cloud = false`).
 - Findings with `category=secret` only go to local providers unless
   `allow_cloud_secrets = true`.
+- Exit code 2 means `--fail-on` matched at least one finding.
 - Exit code 4 means a provider was unavailable or a cloud policy blocked the call.
 - API keys come from environment variables, never from committed config.
 - Untrusted app content is fenced in `<untrusted_data>` before hitting an LLM.
@@ -280,6 +291,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 |---------|-------------|
 | `tool not found in PATH` | Install the external tool, or run `analyze --dry-run` to see which stages are available. |
 | Empty report from an IPA | Old builds treated every input as an APK. Update and re-run; `analyze` now detects the platform. |
+| Exit code 2 | `--fail-on` matched a finding at or above the selected severity. Use `--baseline` to accept known findings. |
 | Exit code 4 | Cloud provider blocked or unavailable. Check `allow_cloud` and `llm health`. |
 | `jadx` runs out of memory | Set `JAVA_OPTS=-Xmx4g` or use `--stages apktool,inventory` first. |
 | semgrep rule pack fails to load | Validate with `semgrep --validate --config internal/rules/mastg/rules.yaml` (or `internal/rules/mastg-ios/rules.yaml`). |

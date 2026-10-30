@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or to a bundled third-party library.
 - `--stages` validation: an unknown stage now fails with the list of valid
   names instead of silently running nothing.
+- CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
+  findings; `--baseline <findings.json|session.json>` suppresses known ones
+  before triage.
+- `mobiscope diff <old> <new>` with `--json <path>`, matching findings by a
+  line-independent fingerprint (new/resolved/unchanged).
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the

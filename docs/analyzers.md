@@ -73,6 +73,22 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 `semgrep --version` to catch broken pins. The allowed-exec set is
 `internal/analyzers/analyzer.go:allowedBinaries` (ADR-006).
 
+## Diff, baseline and the CI gate
+
+- `mobiscope diff old.apk new.apk` analyzes both artifacts with the same stages
+  and prints new/resolved/unchanged findings. `--json <path>` writes the full
+  `{new, resolved, unchanged}` object.
+- `analyze --baseline <findings.json|session.json>` suppresses findings whose
+  fingerprint was already present in the baseline. The count lands in
+  `session.baseline_suppressed`; the baseline is applied before triage.
+- `analyze --fail-on <critical|high|medium|low|info>` exits with code **2**
+  when at least one remaining finding is at or above the threshold (or 0 when
+  the baseline removed them all). `off`/`none` disables the gate.
+- Fingerprints ignore line numbers: semgrep findings use
+  `source_tool|rule_id|file`; everything else uses
+  `category|title|file|evidence`. A moved finding stays “unchanged”; a second
+  occurrence counts as new.
+
 ## Android stages
 
 | Stage | Wraps | Timeout | Artifacts | Findings fed | Required? |

@@ -172,9 +172,11 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   `apksigner`.
 - **Estágio de obfuscação.** R8/DexGuard, string encryption, reflection e
   `--mapping` para deobfuscar símbolos.
-- **Diff, baseline e gate de CI.** `mobiscope diff old.apk new.apk`,
-  `--baseline`, `--fail-on <severity>` e allowlist documentada para
-  identificadores públicos conhecidos e componentes AndroidX.
+- **Diff, baseline e gate de CI.** (feito) `mobiscope diff old.apk new.apk`
+  com `--json`, `analyze --baseline <findings.json|session.json>` e
+  `analyze --fail-on <severity>` (exit code 2). O casamento é por fingerprint
+  e independente de número de linha. A allowlist documentada para
+  identificadores públicos conhecidos e componentes AndroidX continua aberta.
 - **Validar nomes de estágio.** (feito) Um `--stages` inválido agora falha
   listando os nomes válidos para a plataforma detectada.
 

@@ -13,8 +13,11 @@ import (
 
 // Exit codes.
 const (
-	ExitOK              = 0
-	ExitError           = 1
+	ExitOK = 0
+	// ExitError is a generic failure.
+	ExitError = 1
+	// ExitFindings means --fail-on matched at least one finding.
+	ExitFindings        = 2
 	ExitProviderBlocked = 4
 )
 
@@ -47,6 +50,9 @@ func classifyExit(err error) int {
 	if errors.Is(err, llm.ErrCloudNotAllowed) || errors.Is(err, llm.ErrProviderUnavailable) {
 		return ExitProviderBlocked
 	}
+	if errors.Is(err, ErrFindingsAboveThreshold) {
+		return ExitFindings
+	}
 	return ExitError
 }
 
@@ -65,6 +71,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newAnalyzeCmd())
+	cmd.AddCommand(newDiffCmd())
 	cmd.AddCommand(newLLMCmd())
 	cmd.AddCommand(newServeCmd())
 	return cmd

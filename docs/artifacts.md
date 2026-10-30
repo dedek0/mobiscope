@@ -28,7 +28,8 @@ Everything below is written by `internal/pipeline/pipeline.go`
 ├── session.json                 # AnalysisSession
 ├── meta.json                    # run + per-tool metadata
 ├── report.md                    # human report (template)
-└── report.sarif                 # SARIF 2.1.0 export
+├── report.sarif                 # SARIF 2.1.0 export
+└── diff.json                    # diff output (mobiscope diff --json <path>)
 ```
 
 - `session-id` = first 16 hex chars of the SHA-256 of the analyzed file
@@ -268,6 +269,7 @@ struct order.
 | `tool_results` | []ToolResult | Registration order; `null` if no stage ran |
 | `findings` | []Finding | Identical objects to `findings.json` |
 | `llm_cost_usd` | float | `omitempty`: cumulative triage cost, written after `--triage` |
+| `baseline_suppressed` | int | `omitempty`: findings removed by `--baseline` |
 | `summary` | string | Reserved: never written today |
 
 `ToolResult` per entry:
@@ -415,6 +417,23 @@ Notes:
 - iOS sessions look the same, minus `signing_*`, with `platform: "ios"` and
   stages `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`,
   `strings` (+ `inventory-ios` when selected).
+
+## diff.json
+
+Written by `mobiscope diff old new --json <path>` (the path is arbitrary; the
+name above is only an example). Shape:
+
+```json
+{
+  "new": [],
+  "resolved": [],
+  "unchanged": 0
+}
+```
+
+`new` and `resolved` are `[]Finding` arrays (identical objects to
+`findings.json`); `unchanged` is a count. Matching uses the fingerprint
+described in [docs/analyzers.md](analyzers.md) and is line-number independent.
 
 ## meta.json
 

@@ -44,6 +44,8 @@ func newAnalyzeCmd() *cobra.Command {
 		expectCert     string
 		osvLookup      bool
 		writeSBOM      bool
+		failOn         string
+		baseline       string
 	)
 
 	cmd := &cobra.Command{
@@ -114,6 +116,8 @@ func newAnalyzeCmd() *cobra.Command {
 					expectCert:     expectCert,
 					osvLookup:      osvLookup,
 					writeSBOM:      writeSBOM,
+					failOn:         failOn,
+					baseline:       baseline,
 					logger:         logger,
 					ctx:            ctx,
 				})
@@ -171,6 +175,8 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&expectCert, "expect-cert", "", "Expected signing certificate fingerprint (hex); a mismatch is reported as a repackaging signal")
 	cmd.Flags().BoolVar(&osvLookup, "osv", false, "Look the detected libraries up in the OSV vulnerability database (reaches the network)")
 	cmd.Flags().BoolVar(&writeSBOM, "sbom", false, "Write a CycloneDX software bill of materials next to the report")
+	cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit with code 2 when a finding at or above this severity exists (critical|high|medium|low|info; off disables)")
+	cmd.Flags().StringVar(&baseline, "baseline", "", "Suppress findings that match a previous findings.json or session.json")
 
 	return cmd
 }
@@ -196,6 +202,8 @@ type targetFlags struct {
 	expectCert     string
 	osvLookup      bool
 	writeSBOM      bool
+	failOn         string
+	baseline       string
 	logger         *slog.Logger
 	ctx            context.Context
 }
@@ -217,6 +225,11 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	)
 
 	if err := validateStages(stageFilter, target.Platform); err != nil {
+		return nil, err
+	}
+
+	failThreshold, gateEnabled, err := parseFailOn(tf.failOn)
+	if err != nil {
 		return nil, err
 	}
 
@@ -261,6 +274,19 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 
 	sessionDir := filepath.Join(workdir, session.ID)
 
+	// The baseline is applied before triage so known findings do not consume
+	// LLM budget.
+	if tf.baseline != "" {
+		if err := applyBaseline(session, tf.baseline, tf.logger); err != nil {
+			return session, fmt.Errorf("applying baseline: %w", err)
+		}
+		if session.BaselineSuppressed > 0 {
+			if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+				return session, fmt.Errorf("persisting baseline results: %w", err)
+			}
+		}
+	}
+
 	if tf.triage {
 		if err := runTriage(c, session, workdir, tf.logger, tf.triageProvider); err != nil {
 			return session, fmt.Errorf("triage failed: %w", err)
@@ -300,7 +326,16 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	if tf.triage {
 		fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
 	}
+	if session.BaselineSuppressed > 0 {
+		fmt.Fprintf(os.Stderr, "Baseline suppressed: %d\n", session.BaselineSuppressed)
+	}
 	fmt.Fprintf(os.Stderr, "Artifacts: %s/%s/\n", workdir, session.ID)
+
+	if gateEnabled {
+		if n := countAtOrAbove(session.Findings, failThreshold); n > 0 {
+			return session, fmt.Errorf("%w: %d finding(s) at %s or higher", ErrFindingsAboveThreshold, n, failThreshold)
+		}
+	}
 	return session, nil
 }
 

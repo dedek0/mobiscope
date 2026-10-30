@@ -172,9 +172,11 @@ decoded tree when the native parse fails. See
   no `apksigner`.
 - **Obfuscation stage.** R8/DexGuard detection, string encryption, reflection,
   and `--mapping` support to deobfuscate symbols.
-- **Diff, baseline and CI gate.** `mobiscope diff old.apk new.apk`,
-  `--baseline`, `--fail-on <severity>` and a documented allowlist for known
-  public identifiers and AndroidX components.
+- **Diff, baseline and CI gate.** (done) `mobiscope diff old.apk new.apk`
+  with `--json`, `analyze --baseline <findings.json|session.json>` and
+  `analyze --fail-on <severity>` (exit code 2). Matching is fingerprint-based
+  and line-number independent. A documented allowlist for known public
+  identifiers and AndroidX components is still open.
 - **Validate stage names.** (done) An unknown `--stages` entry now fails the
   run with the valid names for the detected platform.
 
