@@ -586,3 +586,41 @@ func TestBuildAnalyzers_ReuseSkipsCachedDecompilers(t *testing.T) {
 	assert.NotContains(t, names, "jadx")
 	assert.NotContains(t, names, "apktool")
 }
+
+func TestValidateDecompiler(t *testing.T) {
+	for _, value := range []string{"", "jadx", "apktool", "dexdc", "both", "jadx,dexdc", " apktool , dexdc "} {
+		assert.NoError(t, validateDecompiler(value), value)
+	}
+	for _, value := range []string{"procyon", "jadx,foo", "dex-decompile"} {
+		assert.Error(t, validateDecompiler(value), value)
+	}
+}
+
+func TestBuildAnalyzers_DEXDC(t *testing.T) {
+	list := buildAnalyzers(stageOptions{decompiler: "dexdc", decompilerSet: true}, androidTarget())
+	assert.Equal(t, []string{"dexdc", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+
+	list = buildAnalyzers(stageOptions{decompiler: "jadx,dexdc", decompilerSet: true}, androidTarget())
+	assert.Equal(t, []string{"jadx", "dexdc", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+}
+
+func TestBuildAnalyzers_ReuseSkipsCachedDEXDC(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "dexdc", "com", "example"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "dexdc", "com", "example", "Main.java"), []byte("class Main {}"), 0o600))
+
+	list := buildAnalyzers(stageOptions{
+		decompiler:    "dexdc",
+		decompilerSet: true,
+		reuse:         true,
+		sessionDir:    dir,
+	}, androidTarget())
+	assert.NotContains(t, analyzerNames(list), "dexdc")
+}
+
+func TestIncludeDecompilers(t *testing.T) {
+	assert.Equal(t, []string{"inventory", "jadx"}, includeDecompilers([]string{"inventory"}, "jadx"))
+	assert.Equal(t, []string{"inventory", "apktool", "jadx"}, includeDecompilers([]string{"inventory"}, "both"))
+	assert.Equal(t, []string{"inventory", "jadx", "dexdc"}, includeDecompilers([]string{"inventory"}, "jadx,dexdc"))
+	assert.Equal(t, []string{"jadx", "gitleaks"}, includeDecompilers([]string{"jadx", "gitleaks"}, "jadx"))
+}

@@ -9,6 +9,10 @@ const (
 	valueNone = "none"
 	valueFull = "full"
 
+	// External-tool output keys.
+	keyStdout = "stdout"
+	keyStderr = "stderr"
+
 	// Anti-analysis marker kinds.
 	markerRoot        = "root"
 	markerEmulator    = "emulator"

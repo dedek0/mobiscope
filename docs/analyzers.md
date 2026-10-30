@@ -15,6 +15,7 @@ and they do **not** all use the same rule:
 |-------|--------------------------|------|
 | `jadx` (Android) | yes | default tree producer |
 | `apktool` (Android) | **no** | only when named in `--stages` or `--decompiler apktool/both` |
+| `dexdc` (Android) | **no** | only when named in `--stages` or `--decompiler dexdc/jadx,dexdc` |
 | `elf`, `anti-analysis`, `repack`, `sdk` (Android) | yes | `stageEnabled()` — runs by default or when named (in-process) |
 | `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`, `strings` (iOS) | yes | `want()` — runs by default or when named |
 | `gitleaks`, `semgrep` (both platforms) | **no** | `stageSet[...]` — **only when explicitly named** |
@@ -122,6 +123,7 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 |-------|-------|---------|-----------|--------------|-----------|
 | `apktool` | `apktool d -f -o <dir> [-r] -- <apk>` | 10 min | `apktool/` (decoded `AndroidManifest.xml`, `res/`, `apktool.yml`) | none directly — feeds inventory | opt-in (or `--decompiler`) |
 | `jadx` | `jadx --threads-count N -d <dir> [--no-res] -- <apk>` | 15 min | `jadx/` (sources + manifest) | none directly — feeds gitleaks/semgrep/inventory/triage context | default tree producer |
+| `dexdc` | `dex-decompile -i <apk> -d <dir> [--deobf] [--exclude <pkg>]` | 15 min | `dexdc/` (Java-like package tree) | none directly — feeds gitleaks/semgrep/inventory/triage context | opt-in (`--decompiler dexdc`) |
 | `elf` | in-process (no binary) | none | fills `inventory.json.native_libs` | `binary_hardening`, `native_code`, `obfuscation` | default |
 | `anti-analysis` | in-process (no binary) | none | — | `anti_analysis`, `obfuscation` | default |
 | `repack` | in-process (no binary) | none | — | `manifest_issue` (repackaging) | default |
@@ -298,19 +300,40 @@ Details and known gaps:
   5000 strings per file; every finding has line 1 (file path + string are
   the dedup key).
 - **gitleaks/semgrep source directory** — both resolve
-  `analyzers.SourceRoot`: `jadx/` first, then `apktool/`, then the session
-  root. On iOS (no `jadx/`, no `apktool/`) that means the *whole session
+  `analyzers.SourceRoot`: `jadx/` first, then `apktool/`, then `dexdc/`, then
+  the session root. On iOS (no `jadx/`, no `apktool/`) that means the *whole session
   directory* (including `extract/`) is scanned: there is no platform-aware
   resolver yet (see [docs/roadmap.md](roadmap.md), P1). `inventory-ios`
   must be requested as `--stages inventory`.
 
-## Decompiler backends (planned)
+## Decompiler backends
 
-`jadx` is the current tree producer. A pluggable backend and the evaluation
-of [`androguard/dex-decompiler`](https://github.com/androguard/dex-decompiler)
-are planned in [docs/roadmap.md](roadmap.md) and
-[ADR-009](adr/009-decompiler-backends.md). The backend is **not implemented**
-yet: no `dexdc` stage exists, and `jadx` remains the default.
+`jadx` remains the default tree producer. The optional `dexdc` stage wraps
+[`androguard/dex-decompiler`](https://github.com/androguard/dex-decompiler)
+and is selected explicitly:
+
+```bash
+./bin/mobiscope analyze app.apk --decompiler dexdc
+./bin/mobiscope analyze app.apk --decompiler jadx,dexdc   # extract both trees
+```
+
+`--decompiler` accepts `apktool`, `jadx`, `dexdc`, the historical `both`
+(`apktool+jadx`) or a comma-separated list. `dexdc` is fail-soft: a missing
+binary becomes a failed stage and the run continues. `SourceRoot` resolves
+`jadx → apktool → dexdc → session root`, so a `jadx,dexdc` run scans the jadx
+reference tree; each backend is evaluated in its own workdir.
+
+Differential evaluation is manual, not part of `go test`:
+
+```bash
+scripts/evaluate-decompiler.py app.apk --workdir targets/eval --json eval.json
+```
+
+It records wall time, decompiler time, peak RSS, finding counts, recall by
+category+title+evidence, strict fingerprint overlap and semgrep error
+notifications, and prints the ADR-009 acceptance checks. See
+[ADR-009](adr/009-decompiler-backends.md). `dexdc` does not become the
+default (`--fast`) until the differential result passes.
 
 ## What each flow needs
 
@@ -322,6 +345,7 @@ yet: no `dexdc` stage exists, and `jadx` remains the default.
 | Manifest/NSC findings only | `inventory` (reads the APK directly; a pre-seeded `jadx/` tree is only a fallback — `scripts/smoke.sh` also exercises that) |
 | Fast iOS pass | defaults; add `gitleaks,semgrep` to use the embedded iOS pack |
 | Signed-artifact facts | automatic on Android — no stage needed |
+| Compare decompiler backends | `--decompiler jadx` and `--decompiler dexdc` in separate workdirs, then `scripts/evaluate-decompiler.py` |
 
 Cross-cutting behavior:
 

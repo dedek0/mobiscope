@@ -17,4 +17,4 @@ apkanalyze/
 *.apk
 *.ipa
 config.toml
-internal/testdata/
+internal/testdata/__pycache__/

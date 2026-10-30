@@ -70,8 +70,8 @@ func (a *APKTool) Run(ctx context.Context, target string, workdir string) (model
 	if cmdResult != nil {
 		result.ExitCode = cmdResult.ExitCode
 		outputData := map[string]string{
-			"stdout": cmdResult.Stdout,
-			"stderr": cmdResult.Stderr,
+			keyStdout: cmdResult.Stdout,
+			keyStderr: cmdResult.Stderr,
 		}
 		result.Output, _ = json.Marshal(outputData)
 	}

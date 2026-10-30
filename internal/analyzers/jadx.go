@@ -81,8 +81,8 @@ func (a *JADX) Run(ctx context.Context, target string, workdir string) (models.T
 	if cmdResult != nil {
 		result.ExitCode = cmdResult.ExitCode
 		outputData := map[string]interface{}{
-			"stdout":       cmdResult.Stdout,
-			"stderr":       cmdResult.Stderr,
+			keyStdout:      cmdResult.Stdout,
+			keyStderr:      cmdResult.Stderr,
 			"dex_warnings": parseDEXWarnings(cmdResult.Stderr),
 			"threads_used": a.cfg.Threads,
 		}

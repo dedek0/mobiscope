@@ -248,24 +248,31 @@ Relevant properties:
 It does **not** decode `res/` or `resources.arsc`, so it cannot replace
 `apktool` for resources. The native AXML/arsc parser in P1 is the complement.
 
-### Integration shape (proposed, not implemented)
+### Integration shape (implemented)
 
-- `--decompiler jadx|dexdc|both`, default `jadx`.
-- Optional stage `dexdc`, fail-soft, pinned commit, `allowedBinaries` entry,
-  output under `<session>/dexdc/`.
-- `SourceRoot` resolves the selected backend explicitly; a session never mixes
-  two trees silently.
-- Converters for `--scan-vulns` and `--taint-output` feed `Finding` objects
-  with `SourceTool=dexdc` and a category mapping; dedup by rule/MASVS against
-  the semgrep/gitleaks findings.
-- `jadx` remains the reference backend until the evaluation below passes.
+- `--decompiler jadx|dexdc|both|a,b`, default `jadx`; `both` keeps the
+  historical `apktool+jadx` meaning and `jadx,dexdc` extracts both trees.
+- Optional stage `dexdc` (`dex-decompile` binary), fail-soft, 15-minute
+  timeout, `allowedBinaries` entry, output under `<session>/dexdc/`.
+- `SourceRoot` resolves `jadx → apktool → dexdc → session root`; a
+  `jadx,dexdc` run scans the jadx reference tree.
+- Converters for `--scan-vulns`/`--taint-output` are deferred until the
+  differential evaluation passes; they will feed `SourceTool=dexdc` findings
+  with a category mapping and dedup by rule/MASVS.
+- `jadx` remains the reference/default backend until the evaluation below
+  passes. The wrapper and harness are implemented; the differential run still
+  has to be executed on the chosen artifacts before changing the default.
 
 See [ADR-009](adr/009-decompiler-backends.md).
 
 ### Evaluation harness (acceptance criteria)
 
-Run both backends against the same APK (start with a large real target) and
-compare:
+Implemented as `scripts/evaluate-decompiler.py <apk>` (manual runbook, not
+part of `go test`). It runs both backends in separate workdirs and emits wall
+time, decompiler time, peak RSS, finding counts, recall by
+category+title+evidence, strict fingerprint overlap and semgrep error
+notifications, plus PASS/FAIL for the acceptance checks below. Run both
+backends against the same APK (start with a large real target) and compare:
 
 | Metric | Target |
 |--------|--------|

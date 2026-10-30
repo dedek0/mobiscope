@@ -63,7 +63,7 @@ func PhaseOf(a Analyzer) Phase {
 // then the session directory itself. Scanners, the manifest reader and the
 // inventory all resolve through this helper so they agree on one root.
 func SourceRoot(workdir string) string {
-	for _, dir := range []string{JADXArtifactPath(workdir), APKToolArtifactPath(workdir), workdir} {
+	for _, dir := range []string{JADXArtifactPath(workdir), APKToolArtifactPath(workdir), DEXDCArtifactPath(workdir), workdir} {
 		if dirExists(dir) {
 			return dir
 		}
@@ -112,6 +112,7 @@ var allowedBinaries = map[string]struct{}{
 	semgrepBinary:   {},
 	"java":          {},
 	apksignerBinary: {},
+	dexdcBinary:     {},
 }
 
 // ErrBinaryNotAllowed is returned when a command name is not on the allowlist.

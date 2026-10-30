@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Golden fixtures cover header-only PEM, complete/escaped PEM and client-side
   identifiers; complete PEM blocks escaped as Java/Kotlin `\n` are now
   detected and redacted.
+- Optional `dexdc` backend (`dex-decompile`) selectable with
+  `--decompiler dexdc` / `--decompiler jadx,dexdc`, fail-soft and with its own
+  output tree; `SourceRoot` resolves it after jadx/apktool.
+- `scripts/evaluate-decompiler.py` runs the ADR-009 differential evaluation
+  (time, RSS, recall, fingerprint overlap, semgrep errors, acceptance checks).
 - CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
   findings; `--baseline <findings.json|session.json>` suppresses known ones
   before triage.

@@ -247,24 +247,31 @@ um decompilador DEX → Java em Rust puro, da própria org do Androguard
 Ele **não** decodifica `res/` nem `resources.arsc`, então não substitui o
 `apktool` para resources. O parser nativo de AXML/arsc do P1 é o complemento.
 
-### Forma de integração (proposta, não implementada)
+### Forma de integração (implementada)
 
-- `--decompiler jadx|dexdc|both`, padrão `jadx`.
-- Estágio opcional `dexdc`, fail-soft, commit pinado, entrada em
-  `allowedBinaries`, saída em `<session>/dexdc/`.
-- `SourceRoot` resolve o backend escolhido explicitamente; uma sessão nunca
-  mistura duas árvores em silêncio.
-- Converters de `--scan-vulns` e `--taint-output` viram `Finding` com
-  `SourceTool=dexdc` e mapeamento de categoria; dedup por regra/MASVS contra
-  os findings de semgrep/gitleaks.
-- O `jadx` continua como backend de referência até a avaliação abaixo passar.
+- `--decompiler jadx|dexdc|both|a,b`, padrão `jadx`; `both` mantém o
+  significado histórico `apktool+jadx` e `jadx,dexdc` extrai as duas árvores.
+- Estágio opcional `dexdc` (binário `dex-decompile`), fail-soft, timeout de
+  15 min, entrada em `allowedBinaries`, saída em `<session>/dexdc/`.
+- `SourceRoot` resolve `jadx → apktool → dexdc → raiz da sessão`; um run
+  `jadx,dexdc` escaneia a árvore de referência do jadx.
+- Converters de `--scan-vulns`/`--taint-output` ficam adiados até a avaliação
+  diferencial passar; depois viram findings `SourceTool=dexdc` com mapeamento
+  de categoria e dedup por regra/MASVS.
+- O `jadx` continua como backend de referência/padrão até a avaliação abaixo
+  passar. O wrapper e o harness estão implementados; o run diferencial ainda
+  precisa ser executado nos artefatos escolhidos antes de mudar o padrão.
 
 Veja o [ADR-009](adr/009-decompiler-backends.md).
 
 ### Harness de avaliação (critérios de aceite)
 
-Rodar os dois backends no mesmo APK (começando por um alvo real grande) e
-comparar:
+Implementado como `scripts/evaluate-decompiler.py <apk>` (runbook manual, fora
+do `go test`). Ele roda os dois backends em workdirs separados e emite tempo
+de parede, tempo do decompilador, RSS de pico, contagem de findings, recall
+por categoria+título+evidência, overlap de fingerprint estrito e notificações
+de erro do semgrep, além de PASS/FAIL para os critérios abaixo. Rodar os dois
+backends no mesmo APK (começando por um alvo real grande) e comparar:
 
 | Métrica | Meta |
 |---------|------|

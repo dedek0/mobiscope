@@ -177,7 +177,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quick, "quick", false, "Skip the optional scanners (gitleaks, semgrep) for a faster pass")
 	cmd.Flags().BoolVar(&noSecrets, "no-secrets", false, "Skip the gitleaks secret scanner")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "Path to a custom semgrep rule pack (default: the embedded MASTG pack)")
-	cmd.Flags().StringVar(&decompiler, "decompiler", "jadx", "Decompiler to run: apktool, jadx or both")
+	cmd.Flags().StringVar(&decompiler, "decompiler", "jadx", "Decompiler(s): apktool, jadx, dexdc, both, or a comma-separated list")
 	cmd.Flags().StringVar(&expectCert, "expect-cert", "", "Expected signing certificate fingerprint (hex); a mismatch is reported as a repackaging signal")
 	cmd.Flags().BoolVar(&osvLookup, "osv", false, "Look the detected libraries up in the OSV vulnerability database (reaches the network)")
 	cmd.Flags().BoolVar(&writeSBOM, "sbom", false, "Write a CycloneDX software bill of materials next to the report")
@@ -238,6 +238,16 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 
 	if err := validateStages(stageFilter, target.Platform); err != nil {
 		return nil, err
+	}
+	if err := validateDecompiler(tf.decompiler); err != nil {
+		return nil, err
+	}
+	// An explicit --decompiler is a request to run that backend even when
+	// --stages names only the scanners. Only extend a non-empty stage list:
+	// appending to the empty list would suppress the default in-process
+	// stages.
+	if c.Flags().Changed("decompiler") && len(stageFilter) > 0 {
+		stageFilter = includeDecompilers(stageFilter, tf.decompiler)
 	}
 
 	failThreshold, gateEnabled, err := parseFailOn(tf.failOn)
@@ -499,6 +509,9 @@ type stageOptions struct {
 const (
 	stageGitleaks = "gitleaks"
 	stageSemgrep  = "semgrep"
+	stageAPKTool  = "apktool"
+	stageJADX     = "jadx"
+	stageDEXDC    = "dexdc"
 )
 
 // optInStages are the optional scanners. They never run on a default pass:
@@ -513,8 +526,8 @@ var optInStages = map[string]bool{
 // report that skipped a check.
 var (
 	androidStages = []string{
-		"apktool", "jadx", "apksigner", "elf", "anti-analysis", "repack",
-		"sdk", stageGitleaks, stageSemgrep, "inventory",
+		stageAPKTool, stageJADX, stageDEXDC, "apksigner", "elf", "anti-analysis",
+		"repack", "sdk", stageGitleaks, stageSemgrep, "inventory",
 	}
 	iosStages = []string{
 		"ipa-extract", "plist", "macho", "codesign", "classdump", "strings",
@@ -579,6 +592,34 @@ func cachedTree(sessionDir, name string) bool {
 	return err == nil
 }
 
+// includeDecompilers adds the explicitly selected backends to a --stages
+// list without duplicating entries.
+func includeDecompilers(stages []string, decompiler string) []string {
+	out := append([]string(nil), stages...)
+	for _, name := range selectedDecompilers(stageOptions{decompiler: decompiler, decompilerSet: true}) {
+		if !stageNamed(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// validateDecompiler rejects unknown --decompiler values.
+func validateDecompiler(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "both" {
+		return nil
+	}
+	for _, part := range strings.Split(value, ",") {
+		switch strings.TrimSpace(part) {
+		case stageAPKTool, stageJADX, stageDEXDC:
+		default:
+			return fmt.Errorf("invalid --decompiler value %q (use apktool, jadx, dexdc, both or a comma-separated list)", value)
+		}
+	}
+	return nil
+}
+
 // stageNamed reports whether an explicit --stages list names a stage.
 func stageNamed(stages []string, name string) bool {
 	for _, s := range stages {
@@ -607,6 +648,40 @@ func rulePackPath(override string, pack rules.Pack) string {
 		return ""
 	}
 	return path
+}
+
+// selectedDecompilers resolves --decompiler/--stages into backend names.
+func selectedDecompilers(opts stageOptions) []string {
+	if opts.decompilerSet {
+		raw := strings.TrimSpace(opts.decompiler)
+		if raw == "both" {
+			return []string{stageAPKTool, stageJADX}
+		}
+		var out []string
+		for _, part := range strings.Split(raw, ",") {
+			switch strings.TrimSpace(part) {
+			case stageAPKTool, stageJADX, stageDEXDC:
+				out = append(out, strings.TrimSpace(part))
+			}
+		}
+		return out
+	}
+	var out []string
+	for _, name := range []string{stageAPKTool, stageJADX, stageDEXDC} {
+		if stageNamed(opts.stages, name) {
+			out = append(out, name)
+		}
+	}
+	if len(opts.stages) == 0 {
+		return []string{stageJADX}
+	}
+	return out
+}
+
+// cachedDEXDC reports whether a previous dexdc run left a non-empty tree.
+func cachedDEXDC(sessionDir string) bool {
+	entries, err := os.ReadDir(filepath.Join(sessionDir, "dexdc"))
+	return err == nil && len(entries) > 0
 }
 
 func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Analyzer {
@@ -642,40 +717,27 @@ func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Anal
 
 	// Android decompilers. The default is jadx only: the native inventory
 	// reader already covers manifest/resources/NSC, so running apktool as
-	// well costs another full decode without adding core facts. An explicit
-	// --stages apktool still selects apktool, and --decompiler both restores
-	// the old behavior.
-	apktoolSelected := stageNamed(opts.stages, "apktool")
-	jadxSelected := stageNamed(opts.stages, "jadx")
-	addAPKTool := func() {
-		if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "apktool") {
-			return
+	// well costs another full decode without adding core facts. apktool and
+	// dexdc are opt-in; `both` keeps the historical apktool+jadx meaning,
+	// and a comma-separated list (e.g. `jadx,dexdc`) selects any mix.
+	for _, name := range selectedDecompilers(opts) {
+		switch name {
+		case stageAPKTool:
+			if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "apktool") {
+				continue
+			}
+			list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
+		case stageJADX:
+			if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "jadx") {
+				continue
+			}
+			list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
+		case stageDEXDC:
+			if opts.reuse && opts.sessionDir != "" && cachedDEXDC(opts.sessionDir) {
+				continue
+			}
+			list = append(list, analyzers.NewDEXDC(analyzers.DEXDCConfig{}))
 		}
-		list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
-	}
-	addJADX := func() {
-		if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "jadx") {
-			return
-		}
-		list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
-	}
-	switch {
-	case opts.decompilerSet && opts.decompiler == "apktool":
-		addAPKTool()
-	case opts.decompilerSet && opts.decompiler == "jadx":
-		addJADX()
-	case opts.decompilerSet:
-		addAPKTool()
-		addJADX()
-	case apktoolSelected && jadxSelected:
-		addAPKTool()
-		addJADX()
-	case apktoolSelected:
-		addAPKTool()
-	case jadxSelected:
-		addJADX()
-	case len(opts.stages) == 0:
-		addJADX()
 	}
 	if opts.stageEnabled("apksigner") {
 		list = append(list, analyzers.NewApkSigner())

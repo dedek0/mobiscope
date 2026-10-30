@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted — the backend abstraction is approved; `dex-decompiler` remains an
-opt-in candidate until the differential evaluation passes.
+Accepted — the `dexdc` backend is implemented as an opt-in stage and the
+differential harness is available (`scripts/evaluate-decompiler.py`).
+`jadx` remains the default until that harness passes on the target artifacts.
 
 ## Context
 
@@ -35,18 +36,20 @@ parser planned in the roadmap.
    directory.
 2. Keep `jadx` as the default and as the reference implementation.
 3. Add an **optional** `dexdc` backend (CLI wrapper, phase `decompiler`) that
-   can be selected with `--decompiler jadx|dexdc|both` and the matching
-   `--stages` entry.
+   can be selected with `--decompiler dexdc`, `--decompiler jadx,dexdc` or the
+   matching `--stages` entry. `both` keeps its historical `apktool+jadx`
+   meaning; a comma-separated list selects any mix.
 4. The backend is fail-soft: a missing binary or a failed export is recorded
    as a failed tool, never as a pipeline error (ADR-005/ADR-006).
-5. `SourceRoot` must resolve the selected backend explicitly. When both
-   trees exist in one session, the selection is recorded, not guessed.
-6. Resource decoding stays with `apktool` until the native parser replaces
-   it. A `dexdc` run without `apktool` reports resource checks as unavailable
-   instead of silently skipping them.
-7. Security output from the backend (`--scan-vulns`, `--taint-solve`) is an
-   additional finding source with its own `SourceTool` and confidence. It
-   does not replace `semgrep` or `gitleaks` until validated.
+5. `SourceRoot` resolves the tree with the fixed preference
+   `jadx → apktool → dexdc → session root`. A `jadx,dexdc` run therefore scans
+   the jadx tree (the reference) and never mixes the two output formats.
+6. Resource decoding no longer needs `apktool`: the native AXML/`arsc` reader
+   in `inventory` covers the manifest, network security config and resource
+   references. A `dexdc`-only run still gets those checks.
+7. Security output from the backend (`--scan-vulns`, `--taint-solve`) is
+   planned as an additional `SourceTool=dexdc` finding source. The converters
+   stay out of the default path until the differential evaluation passes.
 
 ## Evaluation gate
 
@@ -62,8 +65,10 @@ compare it with `jadx` on the same APK:
 | Deterministic finding IDs | stable or explicitly migrated |
 | `--findrefs` on 20 known sinks | correct class/method |
 
-The harness is a build-tagged integration test plus a manual runbook; it is
-not part of the default `go test` path.
+The harness is `scripts/evaluate-decompiler.py` (manual runbook, not part of
+the default `go test` path). It records wall time, decompiler time, peak RSS,
+finding counts, a category+title+evidence recall, strict fingerprint overlap
+and semgrep error notifications.
 
 ## Consequences
 

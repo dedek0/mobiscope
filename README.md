@@ -29,7 +29,7 @@ cd mobiscope
 make build
 
 # External tools (optional, for full analysis)
-# Android: apktool, jadx, gitleaks, semgrep, apksigner
+# Android: jadx, apktool, dex-decompile, gitleaks, semgrep, apksigner
 # iOS:     none required (in-process); ldid/llvm-objdump optional
 ```
 
@@ -70,6 +70,10 @@ before exposing the API.
 
 # Reuse the decompiled tree already stored for this APK's SHA-256
 ./bin/mobiscope analyze app.apk --reuse
+
+# Optional pure-Rust backend (dex-decompile) or both trees
+./bin/mobiscope analyze app.apk --decompiler dexdc
+./bin/mobiscope analyze app.apk --decompiler jadx,dexdc
 
 # Batch: several targets in one run (per-target session dirs + summary table)
 ./bin/mobiscope analyze a.apk b.ipa c.apk
@@ -259,6 +263,9 @@ internal/
 ├── report/               JSON · Markdown · SARIF
 └── utils/                Filesystem helpers
 ```
+
+Decompiler evaluation: `scripts/evaluate-decompiler.py app.apk` compares
+`jadx` and `dex-decompile` (ADR-009) and is manual, not part of CI.
 
 Written references: [docs/analyzers.md](docs/analyzers.md) (per-stage
 behavior, versions, gaps), [docs/artifacts.md](docs/artifacts.md) (output
