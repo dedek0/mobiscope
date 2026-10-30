@@ -220,3 +220,21 @@ func mustJSON(t *testing.T, v interface{}) []byte {
 	require.NoError(t, err)
 	return data
 }
+
+func TestByteEntropy(t *testing.T) {
+	assert.Equal(t, 0.0, byteEntropy(nil))
+	assert.Equal(t, 0.0, byteEntropy(make([]byte, 1024)))
+
+	uniform := make([]byte, 4096)
+	for i := range uniform {
+		uniform[i] = byte(i)
+	}
+	assert.InDelta(t, 8.0, byteEntropy(uniform), 0.001)
+}
+
+func TestDetectELFPacker(t *testing.T) {
+	assert.Equal(t, "", detectELFPacker([]byte("ordinary library strings")))
+	assert.Equal(t, "UPX", detectELFPacker([]byte("junk UPX! junk")))
+	assert.Equal(t, "360 Jiagu", detectELFPacker([]byte("libjiagu.so")))
+	assert.Equal(t, "Tencent Legu", detectELFPacker([]byte("libexecmain.so")))
+}

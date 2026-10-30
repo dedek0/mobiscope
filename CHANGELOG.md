@@ -34,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before triage.
 - `mobiscope diff <old> <new>` with `--json <path>`, matching findings by a
   line-independent fingerprint (new/resolved/unchanged).
+- In-process APK signing-block parser: v2/v3/v3.1 scheme, signer certificate
+  SHA-256 fingerprint, subject, validity and key size, plus v1 presence and
+  debug detection. New findings for an expired signing certificate and a
+  weak RSA key.
+- Native depth: `.so` files under `assets/`, `DT_SONAME`, Shannon entropy,
+  packer signatures and `RegisterNatives` detection.
+- More SDK signatures: Huawei HMS, WeChat, Bugly, MMKV, Alipay, Umeng, JPush,
+  Baidu, Play Billing, Flutter, Unity, Apache HttpClient, Bouncy Castle,
+  SQLCipher, ZXing and the Kotlin stdlib.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the

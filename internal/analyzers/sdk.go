@@ -221,6 +221,70 @@ var sdkSignatures = []sdkSignature{
 		Name: "Cordova", Group: "org.apache.cordova", Artifact: "cordova-android",
 		Prefixes: []string{"Lorg/apache/cordova/"},
 	},
+	{
+		Name: "Huawei HMS", Group: "com.huawei.hms", Artifact: "hms-core",
+		Prefixes: []string{"Lcom/huawei/hms/", "Lcom/huawei/agconnect/"},
+	},
+	{
+		Name: "WeChat Open SDK", Group: "com.tencent.mm", Artifact: "wechat-sdk-android",
+		Prefixes: []string{"Lcom/tencent/mm/opensdk/"},
+	},
+	{
+		Name: "Tencent Bugly", Group: "com.tencent.bugly", Artifact: "bugly",
+		Prefixes: []string{"Lcom/tencent/bugly/"},
+	},
+	{
+		Name: "Tencent MMKV", Group: "com.tencent", Artifact: "mmkv",
+		Prefixes: []string{"Lcom/tencent/mmkv/"},
+	},
+	{
+		Name: "Alipay SDK", Group: "com.alipay", Artifact: "alipay-sdk",
+		Prefixes: []string{"Lcom/alipay/sdk/"},
+	},
+	{
+		Name: "Umeng Analytics", Group: "com.umeng", Artifact: "umeng-common",
+		Prefixes: []string{"Lcom/umeng/"},
+	},
+	{
+		Name: "JPush", Group: "cn.jpush", Artifact: "jpush-android",
+		Prefixes: []string{"Lcn/jpush/"},
+	},
+	{
+		Name: "Baidu Map", Group: "com.baidu", Artifact: "baidu-map-sdk",
+		Prefixes: []string{"Lcom/baidu/mapapi/", "Lcom/baidu/location/"},
+	},
+	{
+		Name: "Google Play Billing", Group: "com.android.billingclient", Artifact: "billing",
+		Prefixes: []string{"Lcom/android/billingclient/"},
+	},
+	{
+		Name: "Flutter", Group: "io.flutter", Artifact: "flutter",
+		Prefixes: []string{"Lio/flutter/"},
+	},
+	{
+		Name: "Unity", Group: "com.unity3d", Artifact: "unity-runtime",
+		Prefixes: []string{"Lcom/unity3d/"},
+	},
+	{
+		Name: "Apache HttpClient", Group: "org.apache.httpcomponents", Artifact: "httpclient",
+		Prefixes: []string{"Lorg/apache/http/"},
+	},
+	{
+		Name: "Bouncy Castle", Group: "org.bouncycastle", Artifact: "bcprov",
+		Prefixes: []string{"Lorg/bouncycastle/"},
+	},
+	{
+		Name: "SQLCipher", Group: "net.zetetic", Artifact: "sqlcipher-android",
+		Prefixes: []string{"Lnet/sqlcipher/"},
+	},
+	{
+		Name: "ZXing", Group: "com.google.zxing", Artifact: "core",
+		Prefixes: []string{"Lcom/google/zxing/"},
+	},
+	{
+		Name: "Kotlin Standard Library", Group: "org.jetbrains.kotlin", Artifact: "kotlin-stdlib",
+		Prefixes: []string{"Lkotlin/"},
+	},
 }
 
 // DetectSDKs inspects the DEX files of the target and the decoded resources

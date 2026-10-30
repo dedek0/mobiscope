@@ -162,14 +162,23 @@ decoded tree when the native parse fails. See
   rules and taint-mode rules (deeplink/intent/clipboard → WebView, SQL, file,
   exec, log), Intent redirection, `ContentProvider.openFile` traversal,
   mutable PendingIntent, clipboard and PII logging.
-- **Native depth.** `RegisterNatives`, packed/encrypted libraries (entropy
-  and packer signatures), `.so` in `assets/`, SONAME/version for OSV.
-- **SDK detection.** More signatures (HMS, Tencent, Alipay, WeChat, Umeng),
-  version recovery from `BuildConfig`/resources, native-only SDKs. Without
-  versions, `--osv` has little to match.
-- **Signing in Go.** Parse the APK Signing Block v2/v3/v3.1, certificate
-  subject/validity/key size, rotation and source stamp. The Docker image has
-  no `apksigner`.
+- **Native depth.** (done) `RegisterNatives` is flagged; `.so` files under
+  `assets/` are inspected; `DT_SONAME`, Shannon entropy and packer signatures
+  (UPX, 360 Jiagu, Tencent Legu, Alibaba, Bangcle, …) land in
+  `native_libs`, with `obfuscation` findings for high entropy and packing.
+  Version recovery for OSV from SONAME/filename is still open.
+- **SDK detection.** (partially done) Signatures now cover Huawei HMS,
+  WeChat, Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter,
+  Unity, Apache HttpClient, Bouncy Castle, SQLCipher, ZXing and the Kotlin
+  stdlib, in addition to the existing Firebase/OkHttp/Gson set. Version
+  recovery from `BuildConfig`/resources and native-only SDKs are still open;
+  without versions, `--osv` has little to match.
+- **Signing in Go.** (parse done) The APK Signing Block v2/v3/v3.1 is parsed
+  in-process: scheme, signer count, certificate SHA-256 fingerprint, subject,
+  validity and key algorithm/size, plus v1 presence and debug detection, so
+  the Docker image no longer reports only a META-INF guess. Still open:
+  recomputing the v2/v3 content digests (cryptographic verification), rotation
+  lineage, source stamp and the APK Signature Scheme v3.1 rotation attributes.
 - **Obfuscation stage.** R8/DexGuard detection, string encryption, reflection,
   and `--mapping` support to deobfuscate symbols.
 - **Diff, baseline and CI gate.** (done) `mobiscope diff old.apk new.apk`

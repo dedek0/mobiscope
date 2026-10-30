@@ -272,6 +272,13 @@ type NativeLib struct {
 	InstallName string   `json:"install_name,omitempty"`
 	Linked      []string `json:"linked,omitempty"`
 	Version     string   `json:"version,omitempty"`
+	// SONAME is the DT_SONAME declared by an ELF library (used for library
+	// matching / OSV lookups).
+	SONAME string `json:"soname,omitempty"`
+	// Entropy is the Shannon entropy of the binary bytes, and Packer names a
+	// packer/protector signature when one is found.
+	Entropy float64 `json:"entropy,omitempty"`
+	Packer  string  `json:"packer,omitempty"`
 
 	// Hardening facts. The pointers are nil when the property could not be
 	// determined (stripped binary, unusual layout), which is different from

@@ -64,7 +64,7 @@ on PATH (recorded per run in `meta.json`/`session.json` via
 | JRE | Temurin 21 (jammy) | `Dockerfile` base image |
 | unzip, libplist-utils, llvm | unpinned (apt) | `Dockerfile` — fallbacks only |
 | ipsw, ldid | not installed by default (`IPSW_VERSION=v0.0.0`) | `Dockerfile` |
-| apksigner | **not shipped in the image** | host-only; image falls back to the META-INF heuristic |
+| apksigner | **not shipped in the image** | host-only; the image uses the in-process signing-block parser (scheme, certificate, v1 presence) |
 
 `Makefile` and `.github/workflows/ci.yml` pin only developer tools
 (gofumpt v0.8.0 and golangci-lint v2.13.2 in the Makefile; CI pins
@@ -117,10 +117,14 @@ Details and known gaps:
   for every scanner below; they resolve `analyzers.SourceRoot`
   (`jadx/` → `apktool/` → session root), so an apktool-only run still gets
   scanned.
-- **elf** — reads native libraries straight from the APK (`lib/<abi>/*.so`)
-  and records PIE, RELRO, NX, stack canary, FORTIFY, stripping, text
-  relocations, RPATH and `Java_*` JNI exports in `inventory.json.native_libs`.
-  It also surfaces the anti-analysis strings found in the binary.
+- **elf** — reads native libraries straight from the APK (`lib/<abi>/*.so`,
+  plus ELF-magic `.so` files under `assets/`) and records PIE, RELRO, NX, stack
+  canary, FORTIFY, stripping, text relocations, RPATH, `DT_SONAME`, `Java_*`
+  JNI exports, Shannon entropy and packer signatures (UPX, 360 Jiagu, Tencent
+  Legu, Alibaba, Bangcle, …) in `inventory.json.native_libs`. High-entropy
+  libraries and packer signatures become `obfuscation` findings. It also
+  surfaces the anti-analysis strings found in the binary, and the
+  `anti-analysis` stage now flags `RegisterNatives`.
 - **anti-analysis** — parses the DEX class names to score obfuscation and
   scans DEX/executable assets (`.dex`, `.jar`, `.so`, `.apk`) for
   root/emulator, anti-debug, instrumentation (Frida/Xposed) and
@@ -188,11 +192,15 @@ Details and known gaps:
   Google OAuth client ID, Firebase URL) are `info`/`public`. Every finding sets
   `platform` and `origin` (`app` or `sdk:<name>`).
 - **apksigner** — runs implicitly and is not selectable. Its findings
-  (debug-signed, no signer, v1-only) are wired through
-  `ConvertFindings`; `signing_cert_fp` and `signature_scheme` also land on
-  the session. When the binary is missing (including the Docker image),
-  `metaInfHeuristic` checks `META-INF/*.RSA|DSA|EC` **and** the v2/v3 APK
-  Signing Block, so a modern v2/v3-only APK is not reported as unsigned.
+  (debug-signed, no signer, v1-only, expired certificate, weak RSA key) are
+  wired through `ConvertFindings`; `signing_cert_fp` and
+  `signature_scheme` also land on the session. When the binary is missing
+  (including the Docker image), the in-process parser (`signing.go`) reads the
+  APK Signing Block v2/v3/v3.1, extracts the signer certificate (SHA-256
+  fingerprint, subject, validity, key algorithm/size), combines it with the
+  v1 `META-INF/*.RSA|DSA|EC` presence, and reports the scheme. It is a parse,
+  not a cryptographic verification: `apksigner` remains the verifier when
+  available, and the v2/v3 digests are not recomputed yet.
 
 ## iOS stages
 

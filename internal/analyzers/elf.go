@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -150,6 +151,16 @@ func ConvertELFFindings(raw []byte, sessionID string) []models.Finding {
 				fmt.Sprintf("%s references %q, a marker for runtime instrumentation, root detection or emulator detection implemented in native code.", lib.Path, marker),
 				marker, models.CategoryObfuscation, sev, models.SensitivityInternal, 0.7)
 		}
+		if lib.Packer != "" {
+			add(lib, "Native library is packed",
+				fmt.Sprintf("%s carries the signature of %s; the real code is unpacked at runtime and a static review of the .so sees only the stub.", lib.Path, lib.Packer),
+				"packer="+lib.Packer, models.CategoryObfuscation, models.SeverityMedium, models.SensitivityInternal, 0.8)
+		}
+		if lib.Encrypted {
+			add(lib, "Native library has high entropy",
+				fmt.Sprintf("%s has an entropy of %.2f bits/byte, consistent with encryption or packing; code and strings may be hidden from static analysis.", lib.Path, lib.Entropy),
+				fmt.Sprintf("entropy=%.2f", lib.Entropy), models.CategoryObfuscation, models.SeverityMedium, models.SensitivityInternal, 0.7)
+		}
 	}
 
 	return findings
@@ -178,7 +189,9 @@ func (e *ELF) collectFromArchive(target string) []models.NativeLib {
 			break
 		}
 		name := f.Name
-		if !strings.HasPrefix(name, "lib/") || !strings.HasSuffix(name, ".so") {
+		inLibTree := strings.HasPrefix(name, "lib/")
+		inAssets := strings.HasPrefix(name, "assets/")
+		if (!inLibTree && !inAssets) || !strings.HasSuffix(name, ".so") {
 			continue
 		}
 		if f.UncompressedSize64 > maxNativeLibBytes {
@@ -282,8 +295,76 @@ func inspectELF(data []byte, name string) *models.NativeLib {
 	lib.Linked = elfNeeded(f)
 	lib.JNIExports = elfJNIExports(f)
 	lib.AntiAnalysis = elfAntiAnalysis(data)
+	lib.SONAME = elfSONAME(f)
+	lib.Entropy = byteEntropy(data)
+	lib.Packer = detectELFPacker(data)
+	// A large, near-uniform binary is the signature of a packer or an
+	// encrypted payload. Small libraries can legitimately be compressed.
+	if len(data) >= 64*1024 && lib.Entropy >= 7.5 {
+		lib.Encrypted = true
+	}
 
 	return lib
+}
+
+// elfSONAME returns the DT_SONAME declared by the library.
+func elfSONAME(f *elf.File) string {
+	names, err := f.DynString(elf.DT_SONAME)
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+	return names[0]
+}
+
+// byteEntropy computes the Shannon entropy (bits per byte) of data.
+func byteEntropy(data []byte) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	var counts [256]int
+	for _, b := range data {
+		counts[b]++
+	}
+	total := float64(len(data))
+	entropy := 0.0
+	for _, c := range counts {
+		if c == 0 {
+			continue
+		}
+		p := float64(c) / total
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
+}
+
+// elfpPackerSignatures maps a byte pattern to the packer/protector it
+// identifies. The patterns are intentionally specific to avoid generic words.
+var elfPackerSignatures = []struct {
+	needle string
+	name   string
+}{
+	{"upx!", "UPX"},
+	{"libjiagu", "360 Jiagu"},
+	{"jiagu", "360 Jiagu"},
+	{"dexhelper", "Baidu DexHelper"},
+	{"libmobisec", "Alibaba Mobisec"},
+	{"libsgmain", "Alibaba SecurityGuard"},
+	{"libnesec", "NetEase Yidun"},
+	{"libexecmain", "Tencent Legu"},
+	{"libchaosvmp", "ChaosVMP"},
+	{"libddog", "Bangcle"},
+	{"libfdog", "Bangcle"},
+}
+
+// detectELFPacker names the packer/protector whose signature appears in data.
+func detectELFPacker(data []byte) string {
+	lower := bytes.ToLower(data)
+	for _, sig := range elfPackerSignatures {
+		if bytes.Contains(lower, []byte(sig.needle)) {
+			return sig.name
+		}
+	}
+	return ""
 }
 
 // isELF reports whether data starts with the ELF magic.

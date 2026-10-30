@@ -374,6 +374,10 @@ var antiAnalysisPatterns = []antiMarkerPattern{
 		desc: "The app loads a native library, so part of its behaviour lives outside the Dalvik bytecode.",
 	},
 	{
+		needle: "RegisterNatives", kind: "jni-register", title: "App registers native methods at runtime", sev: models.SeverityMedium,
+		desc: "RegisterNatives binds Java methods to native functions dynamically, which hides the Java-to-native call graph from a static review.",
+	},
+	{
 		needle: "Runtime.getRuntime", kind: "runtime-exec", title: "App shells out to a process", sev: models.SeverityMedium,
 		desc: "The app spawns external processes, which can execute commands the static review cannot see.",
 	},

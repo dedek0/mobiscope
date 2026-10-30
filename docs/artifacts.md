@@ -504,7 +504,7 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
 | `permissions` | []string | Android only (declared `<uses-permission>` entries) |
 | `network` | object | both; Android populates `kind` (`network_security_config`) only when an NSC exists, plus `cleartext_permitted` and `pinned`; iOS uses `NSAppTransportSecurity` facts |
 | `obfuscation` | object | Android: populated by the `anti-analysis` stage (`score`, `indicators` such as class count, short-name ratio and toolchain) |
-| `native_libs` | []object | Android only, `omitempty`: populated by the `elf` stage (hardening flags, JNI exports, anti-analysis strings) |
+| `native_libs` | []object | Android only, `omitempty`: populated by the `elf` stage (hardening flags, JNI exports, anti-analysis strings, `soname`, `entropy`, `packer`, `encrypted`; also inspects `.so` files under `assets/`) |
 | `sdks` | []object | Android only, `omitempty`: third-party libraries detected by the `sdk` stage (`name`, `group`, `artifact`, `version`, `package`, `evidence`, `confidence`) |
 | `vulnerabilities` | []object | Android only, `omitempty`: OSV advisories for `sdks`, written only with `--osv` (`id`, `summary`, `severity`, `package`, `version`, `fixed_in`, `aliases`, `reference`) |
 | `entitlements`, `url_schemes` | — | schema-reserved: never written by the current collectors |

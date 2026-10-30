@@ -446,6 +446,14 @@ func TestScanDEXStrings_FindsSecret(t *testing.T) {
 	assert.Equal(t, 1, agg.URLs.Count)
 }
 
+func TestSDKByClassPrefix(t *testing.T) {
+	assert.Equal(t, "Huawei HMS", SDKByClassPrefix("Lcom/huawei/hms/core/Foo;"))
+	assert.Equal(t, "WeChat Open SDK", SDKByClassPrefix("Lcom/tencent/mm/opensdk/openapi/IWXAPI;"))
+	assert.Equal(t, "Alipay SDK", SDKByClassPrefix("Lcom/alipay/sdk/app/PayTask;"))
+	assert.Equal(t, "Umeng Analytics", SDKByClassPrefix("Lcom/umeng/analytics/MobclickAgent;"))
+	assert.Equal(t, "", SDKByClassPrefix("Lcom/example/app/Main;"))
+}
+
 func TestOriginForPath(t *testing.T) {
 	assert.Equal(t, "sdk:OkHttp", OriginForPath("sources/okhttp3/OkHttpClient.java"))
 	assert.Equal(t, "sdk:Gson", OriginForPath("sources/com/google/gson/Gson.java"))

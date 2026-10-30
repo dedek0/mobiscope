@@ -2,12 +2,9 @@ package analyzers
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +62,8 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 	}
 
 	var scheme, certFP, signerCount, debug string
+	source := "in-process"
+	material, materialErr := inspectAPKSigningMaterial(target)
 
 	if CheckBinary(apksignerBinary) == nil {
 		cmdRes, err := a.runner.Run(ctx, apksignerBinary, []string{
@@ -72,14 +71,33 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 		}, apksignerTo, nil)
 		if cmdRes != nil {
 			scheme, certFP, signerCount, debug = parseApksignerOutput(cmdRes.Stdout + cmdRes.Stderr)
+			if scheme != "" {
+				source = "apksigner"
+			}
 		}
 		if err != nil {
-			// Non-fatal: fall through to the META-INF heuristic.
+			// Non-fatal: fall through to the in-process parser.
 			result.Error = err.Error()
 		}
 	}
 	if scheme == "" {
-		scheme, certFP, signerCount = metaInfHeuristic(target)
+		switch {
+		case materialErr != nil:
+			scheme, certFP, signerCount = unknownVersion, "", "unknown"
+		default:
+			scheme = material.Scheme
+			certFP = material.CertFP
+			signerCount = strconv.Itoa(material.SignerCount)
+			if material.Debug {
+				debug = boolTrue
+			}
+		}
+	}
+	if certFP == "" && materialErr == nil {
+		certFP = material.CertFP
+	}
+	if material.Debug {
+		debug = boolTrue
 	}
 
 	raw, _ := json.Marshal(map[string]interface{}{
@@ -87,6 +105,12 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 		"signing_cert_fp":  certFP,
 		"signer_count":     signerCount,
 		"debug_signed":     debug == boolTrue || strings.Contains(strings.ToLower(debug), "debug"),
+		"signing_source":   source,
+		"cert_subject":     material.CertSubject,
+		"cert_not_before":  formatSigningTime(material.CertNotFrom),
+		"cert_not_after":   formatSigningTime(material.CertNotTo),
+		"key_algorithm":    material.KeyAlg,
+		"key_bits":         material.KeyBits,
 	})
 	result.Output = raw
 	result.Duration = time.Since(start)
@@ -99,6 +123,12 @@ type apksignerOutput struct {
 	SigningCertFP   string `json:"signing_cert_fp"`
 	SignerCount     string `json:"signer_count"`
 	DebugSigned     bool   `json:"debug_signed"`
+	SigningSource   string `json:"signing_source,omitempty"`
+	CertSubject     string `json:"cert_subject,omitempty"`
+	CertNotBefore   string `json:"cert_not_before,omitempty"`
+	CertNotAfter    string `json:"cert_not_after,omitempty"`
+	KeyAlgorithm    string `json:"key_algorithm,omitempty"`
+	KeyBits         int    `json:"key_bits,omitempty"`
 }
 
 // ConvertApkSignerFindings reports signature-level issues.
@@ -142,7 +172,28 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 			"v1 signatures do not cover the entire APK and are vulnerable to Janus-style attacks; prefer v2/v3.",
 			"scheme=v1", models.SeverityMedium, models.SensitivityConfidential, 0.85)
 	}
+	if out.CertNotAfter != "" {
+		if expiry, err := time.Parse(time.RFC3339, out.CertNotAfter); err == nil && time.Now().After(expiry) {
+			add("Signing certificate has expired",
+				fmt.Sprintf("The signing certificate expired on %s. Android still accepts the signature, but rotation and trust decisions may fail.", expiry.Format("2006-01-02")),
+				"cert_not_after="+expiry.Format("2006-01-02"), models.SeverityMedium, models.SensitivityInternal, 0.85)
+		}
+	}
+	if out.KeyBits > 0 && out.KeyBits < 2048 && strings.EqualFold(out.KeyAlgorithm, "RSA") {
+		add("Weak signing key",
+			fmt.Sprintf("The signing certificate uses a %d-bit RSA key; 2048 bits or more is the current minimum.", out.KeyBits),
+			fmt.Sprintf("key_algorithm=%s key_bits=%d", out.KeyAlgorithm, out.KeyBits),
+			models.SeverityMedium, models.SensitivityInternal, 0.8)
+	}
 	return findings
+}
+
+// formatSigningTime renders a certificate timestamp, omitting the zero value.
+func formatSigningTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // parseApksignerOutput extracts the fields `apksigner verify --print-certs`
@@ -214,74 +265,14 @@ func parseCountAfterColon(line string) (int, bool) {
 // It checks the v1 META-INF block and the v2/v3 APK Signing Block, so a
 // modern v2/v3-only APK is not misreported as unsigned.
 func metaInfHeuristic(target string) (scheme, certFP, signerCount string) {
-	zr, err := openZip(target)
+	info, err := inspectAPKSigningMaterial(target)
 	if err != nil {
 		return unknownVersion, "", "unknown"
 	}
-	defer zr.Close()
-
-	certs := 0
-	for _, f := range zr.File {
-		name := strings.ToUpper(f.Name)
-		if strings.HasPrefix(name, "META-INF/") {
-			if strings.HasSuffix(name, ".RSA") || strings.HasSuffix(name, ".DSA") || strings.HasSuffix(name, ".EC") {
-				certs++
-			}
-		}
+	if info.Scheme == "" {
+		info.Scheme = valueNone
 	}
-
-	hasBlock := hasAPKSigningBlock(target)
-	switch {
-	case certs > 0 && hasBlock:
-		return "v1+v2/v3", "", fmt.Sprintf("%d", certs)
-	case certs > 0:
-		return "v1", "", fmt.Sprintf("%d", certs)
-	case hasBlock:
-		return "v2/v3", "", "unknown"
-	default:
-		return valueNone, "", "0"
-	}
-}
-
-// hasAPKSigningBlock reports whether the APK carries the v2/v3 APK Signing
-// Block. The block sits immediately before the ZIP central directory and ends
-// with the 16-byte "APK Sig Block 42" magic.
-func hasAPKSigningBlock(path string) bool {
-	f, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	st, err := f.Stat()
-	if err != nil || st.Size() < 32 {
-		return false
-	}
-	size := st.Size()
-
-	// The EOCD record lives in the last 64 KiB + 22 bytes.
-	tailLen := int64(64*1024 + 22)
-	if tailLen > size {
-		tailLen = size
-	}
-	tail := make([]byte, tailLen)
-	if _, err := f.ReadAt(tail, size-tailLen); err != nil {
-		return false
-	}
-	idx := bytes.LastIndex(tail, []byte("PK\x05\x06"))
-	if idx < 0 || idx+22 > len(tail) {
-		return false
-	}
-	cdOffset := int64(binary.LittleEndian.Uint32(tail[idx+16:]))
-	if cdOffset < 24 || cdOffset > size {
-		return false
-	}
-
-	footer := make([]byte, 24)
-	if _, err := f.ReadAt(footer, cdOffset-24); err != nil {
-		return false
-	}
-	return string(footer[8:24]) == apkSigBlockMagic
+	return info.Scheme, info.CertFP, strconv.Itoa(info.SignerCount)
 }
 
 func atoiSafe(s string) int {
