@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intent/deeplink → WebView, SQL, file and exec, clipboard → log and intent
   redirection; `ContentProvider.openFile` traversal and a tightened mutable
   `PendingIntent` rule. 41 rules total, validated during the Docker build.
+- `analyze --mapping mapping.txt` deobfuscates finding locations and class
+  names through an R8/ProGuard mapping before baseline/triage.
+- A built-in allowlist skips exported AndroidX/library infrastructure
+  components that are not app-specific attack surface.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the

@@ -184,13 +184,18 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   META-INF. Continua aberto: recalcular os digests v2/v3 (verificação
   criptográfica), lineage de rotação, source stamp e atributos de rotação do
   v3.1.
-- **Estágio de obfuscação.** R8/DexGuard, string encryption, reflection e
-  `--mapping` para deobfuscar símbolos.
+- **Estágio de obfuscação.** (parcial) O estágio `anti-analysis` detecta
+  artefatos R8/ProGuard/DexGuard, nomes curtos de classe e toolchain de
+  obfuscação, e `analyze --mapping mapping.txt` reescreve caminhos e nomes de
+  classe obfuscados nos findings antes de baseline/triage. Continua aberto:
+  um estágio dedicado de string encryption/reflection e deobfuscação
+  server-side além do mapeamento de classe/arquivo.
 - **Diff, baseline e gate de CI.** (feito) `mobiscope diff old.apk new.apk`
   com `--json`, `analyze --baseline <findings.json|session.json>` e
   `analyze --fail-on <severity>` (exit code 2). O casamento é por fingerprint
-  e independente de número de linha. A allowlist documentada para
-  identificadores públicos conhecidos e componentes AndroidX continua aberta.
+  e independente de número de linha. Uma allowlist embutida agora ignora
+  componentes de infraestrutura AndroidX/bibliotecas; uma allowlist
+  extensível pelo usuário para identificadores públicos continua aberta.
 - **Validar nomes de estágio.** (feito) Um `--stages` inválido agora falha
   listando os nomes válidos para a plataforma detectada.
 
@@ -283,7 +288,7 @@ entrada da decisão.
    targetSdk e origem do finding.
 3. P2 diff/baseline/gate de CI (feito).
 4. P2 Kotlin/taint, parse de assinatura, profundidade nativa e detecção de SDK
-   (feito). Continua aberto no P2: estágio de obfuscação/`--mapping`,
-   allowlist e verificação completa de assinatura v2/v3.
+   (feito). Continua aberto no P2: string encryption/reflection, allowlist
+   extensível e verificação completa de assinatura v2/v3.
 5. Avaliação do backend de decompilação, depois `--fast`.
 6. P3 performance/relatório.

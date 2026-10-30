@@ -102,6 +102,9 @@ before exposing the API.
 # Suppress findings already present in a previous report
 ./bin/mobiscope analyze app.apk --baseline previous/findings.json --fail-on high
 
+# Deobfuscate finding locations with the R8/ProGuard mapping
+./bin/mobiscope analyze app.apk --mapping mapping.txt
+
 # Compare two builds (new/resolved/unchanged findings)
 ./bin/mobiscope diff old.apk new.apk
 ./bin/mobiscope diff old.apk new.apk --json diff.json

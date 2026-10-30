@@ -168,3 +168,19 @@ func TestAnalyzeManifest_CustomSchemeAndBackupRules(t *testing.T) {
 	assert.Contains(t, all, "Backup content rules")
 	assert.Contains(t, all, "shares a user ID")
 }
+
+func TestAnalyzeManifest_AllowlistedAndroidXComponent(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `<?xml version="1.0"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.app">
+    <application>
+        <receiver android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver" android:exported="true"/>
+        <receiver android:name="com.example.LeakyReceiver" android:exported="true"/>
+    </application>
+</manifest>`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AndroidManifest.xml"), []byte(manifest), 0o600))
+
+	findings := NewInventory().analyzeManifest(dir, "s")
+	require.Len(t, findings, 1)
+	assert.Contains(t, findings[0].Title, "LeakyReceiver")
+}

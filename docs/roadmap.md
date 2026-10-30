@@ -183,13 +183,18 @@ decoded tree when the native parse fails. See
   the Docker image no longer reports only a META-INF guess. Still open:
   recomputing the v2/v3 content digests (cryptographic verification), rotation
   lineage, source stamp and the APK Signature Scheme v3.1 rotation attributes.
-- **Obfuscation stage.** R8/DexGuard detection, string encryption, reflection,
-  and `--mapping` support to deobfuscate symbols.
+- **Obfuscation stage.** (partially done) The anti-analysis stage detects
+  R8/ProGuard/DexGuard artifacts, short class names and obfuscation tooling,
+  and `analyze --mapping mapping.txt` rewrites obfuscated class paths and
+  class names in findings before baseline/triage. Still open: a dedicated
+  string-encryption/reflection stage and server-side deobfuscation beyond the
+  class/file mapping.
 - **Diff, baseline and CI gate.** (done) `mobiscope diff old.apk new.apk`
   with `--json`, `analyze --baseline <findings.json|session.json>` and
   `analyze --fail-on <severity>` (exit code 2). Matching is fingerprint-based
-  and line-number independent. A documented allowlist for known public
-  identifiers and AndroidX components is still open.
+  and line-number independent. A built-in allowlist now skips
+  AndroidX/library infrastructure components; a user-extensible allowlist for
+  public identifiers is still open.
 - **Validate stage names.** (done) An unknown `--stages` entry now fails the
   run with the valid names for the detected platform.
 
@@ -282,7 +287,7 @@ result is the decision input.
    finding origin.
 3. P2 diff/baseline/CI gate (done).
 4. P2 Kotlin/taint, signing parse, native depth and SDK detection (done).
-   Still open in P2: obfuscation stage/`--mapping`, the allowlist and full
-   v2/v3 signature verification.
+   Still open in P2: string-encryption/reflection detection, a user-extensible
+   allowlist and full v2/v3 signature verification.
 5. Decompiler backend evaluation, then `--fast`.
 6. P3 performance/reporting.

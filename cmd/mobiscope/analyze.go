@@ -46,6 +46,7 @@ func newAnalyzeCmd() *cobra.Command {
 		writeSBOM      bool
 		failOn         string
 		baseline       string
+		mapping        string
 	)
 
 	cmd := &cobra.Command{
@@ -118,6 +119,7 @@ func newAnalyzeCmd() *cobra.Command {
 					writeSBOM:      writeSBOM,
 					failOn:         failOn,
 					baseline:       baseline,
+					mapping:        mapping,
 					logger:         logger,
 					ctx:            ctx,
 				})
@@ -177,6 +179,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&writeSBOM, "sbom", false, "Write a CycloneDX software bill of materials next to the report")
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit with code 2 when a finding at or above this severity exists (critical|high|medium|low|info; off disables)")
 	cmd.Flags().StringVar(&baseline, "baseline", "", "Suppress findings that match a previous findings.json or session.json")
+	cmd.Flags().StringVar(&mapping, "mapping", "", "R8/ProGuard mapping.txt used to deobfuscate finding locations")
 
 	return cmd
 }
@@ -204,6 +207,7 @@ type targetFlags struct {
 	writeSBOM      bool
 	failOn         string
 	baseline       string
+	mapping        string
 	logger         *slog.Logger
 	ctx            context.Context
 }
@@ -274,6 +278,19 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 
 	sessionDir := filepath.Join(workdir, session.ID)
 
+	// Deobfuscate locations before the baseline/triage passes so all later
+	// matching uses the original class names.
+	if tf.mapping != "" {
+		if err := applyMapping(session, tf.mapping, tf.logger); err != nil {
+			return session, fmt.Errorf("applying mapping: %w", err)
+		}
+		if session.FindingsMapped > 0 {
+			if err := pipeline.PersistArtifacts(sessionDir, session); err != nil {
+				return session, fmt.Errorf("persisting mapped findings: %w", err)
+			}
+		}
+	}
+
 	// The baseline is applied before triage so known findings do not consume
 	// LLM budget.
 	if tf.baseline != "" {
@@ -325,6 +342,9 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	}
 	if tf.triage {
 		fmt.Fprintf(os.Stderr, "Triaged: %d\n", countTriaged(session.Findings))
+	}
+	if session.FindingsMapped > 0 {
+		fmt.Fprintf(os.Stderr, "Mapped findings: %d\n", session.FindingsMapped)
 	}
 	if session.BaselineSuppressed > 0 {
 		fmt.Fprintf(os.Stderr, "Baseline suppressed: %d\n", session.BaselineSuppressed)

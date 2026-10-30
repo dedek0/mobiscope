@@ -270,6 +270,7 @@ struct order.
 | `findings` | []Finding | Identical objects to `findings.json` |
 | `llm_cost_usd` | float | `omitempty`: cumulative triage cost, written after `--triage` |
 | `baseline_suppressed` | int | `omitempty`: findings removed by `--baseline` |
+| `findings_mapped` | int | `omitempty`: findings whose locations were rewritten by `--mapping` |
 | `summary` | string | Reserved: never written today |
 
 `ToolResult` per entry:

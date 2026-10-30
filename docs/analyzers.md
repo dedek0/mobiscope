@@ -84,6 +84,10 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 - `analyze --fail-on <critical|high|medium|low|info>` exits with code **2**
   when at least one remaining finding is at or above the threshold (or 0 when
   the baseline removed them all). `off`/`none` disables the gate.
+- `analyze --mapping <mapping.txt>` rewrites obfuscated class paths in
+  finding locations (and class names in evidence/description) through an
+  R8/ProGuard mapping, then re-clusters. It runs before `--baseline` and
+  triage; the count lands in `session.findings_mapped`.
 - Fingerprints ignore line numbers: semgrep findings use
   `source_tool|rule_id|file`; everything else uses
   `category|title|file|evidence`. A moved finding stays “unchanged”; a second
@@ -172,7 +176,11 @@ Details and known gaps:
   Checks are `targetSdk`-aware: `android:exported` defaults, provider defaults,
   pre-API-28 cleartext, App Links without `autoVerify`, singleTask /
   singleInstance task affinity, `grant-uri-permission` children, and
-  `usesCleartextTraffic` defaults.
+  `usesCleartextTraffic` defaults. A conservative built-in allowlist skips
+  exported components that belong to AndroidX and other library infrastructure
+  (`androidx.work`, `androidx.startup`, `androidx.profileinstaller`,
+  `android.support`, Datatransport, Play measurement, Firebase messaging), so
+  library plumbing does not drown app-specific exported components.
   The network security config is fully parsed (`nsc.go`): base and per-domain
   `cleartextTrafficPermitted`, `debug-overrides`, `overridePins`,
   `pin-set`/`expiration`, and trust anchors. Only relaxations are findings;

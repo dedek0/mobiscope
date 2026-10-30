@@ -300,6 +300,37 @@ var dangerousPermSuffixes = map[string]bool{
 	"NEARBY_WIFI_DEVICES": true,
 }
 
+// allowlistedComponentPrefixes are framework/AndroidX components that are
+// routinely exported but are not an app-specific attack surface. Reporting
+// every one of them drowns the real exported components (P0 principle: signal
+// before volume). The list is intentionally conservative and only covers
+// library classes, never an app package.
+var allowlistedComponentPrefixes = []string{
+	"androidx.work.",
+	"androidx.profileinstaller.",
+	"androidx.startup.",
+	"androidx.emoji2.",
+	"androidx.core.",
+	"androidx.room.",
+	"androidx.media3.",
+	"androidx.appcompat.",
+	"android.support.",
+	"com.google.android.datatransport.",
+	"com.google.android.gms.measurement.",
+	"com.google.firebase.messaging.",
+}
+
+// isAllowlistedComponent reports whether a component belongs to a bundled
+// library whose exported entry points are not app-specific.
+func isAllowlistedComponent(name string) bool {
+	for _, prefix := range allowlistedComponentPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // isDangerousPermission reports whether perm is a known dangerous permission,
 // matched on its final name segment.
 func isDangerousPermission(perm string) bool {
@@ -377,6 +408,9 @@ func (inv *Inventory) manifestFindings(m *androidManifest, sessionID string) []m
 	}
 
 	for _, comp := range m.components() {
+		if isAllowlistedComponent(comp.Name) {
+			continue
+		}
 		if comp.Kind == componentKindProvider && comp.GrantURI {
 			findings = append(findings, manifestFinding(sessionID,
 				fmt.Sprintf("Content provider grants URI permissions: %s", comp.Name),

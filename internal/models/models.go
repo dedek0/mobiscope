@@ -29,6 +29,9 @@ type AnalysisSession struct {
 	// BaselineSuppressed is the number of findings removed because they
 	// matched a --baseline file.
 	BaselineSuppressed int `json:"baseline_suppressed,omitempty"`
+	// FindingsMapped is the number of findings whose obfuscated locations
+	// were rewritten through --mapping.
+	FindingsMapped int `json:"findings_mapped,omitempty"`
 	// LLMCostUSD is the cumulative cost of LLM triage for this session (0
 	// when triage did not run).
 	LLMCostUSD float64 `json:"llm_cost_usd,omitempty"`
