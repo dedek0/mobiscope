@@ -268,7 +268,8 @@ See [ADR-009](adr/009-decompiler-backends.md).
 ### Evaluation harness (acceptance criteria)
 
 Implemented as `scripts/evaluate-decompiler.py <apk>` (manual runbook, not
-part of `go test`). It runs both backends in separate workdirs and emits wall
+part of `go test`); the current status and next-run checklist live in
+[docs/decompiler-evaluation.md](decompiler-evaluation.md). It runs both backends in separate workdirs and emits wall
 time, decompiler time, peak RSS, finding counts, recall by
 category+title+evidence, strict fingerprint overlap and semgrep error
 notifications, plus PASS/FAIL for the acceptance checks below. Run both

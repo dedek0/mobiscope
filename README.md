@@ -265,7 +265,8 @@ internal/
 ```
 
 Decompiler evaluation: `scripts/evaluate-decompiler.py app.apk` compares
-`jadx` and `dex-decompile` (ADR-009) and is manual, not part of CI.
+`jadx` and `dex-decompile` (ADR-009) and is manual, not part of CI. Status and
+next-run checklist: [docs/decompiler-evaluation.md](docs/decompiler-evaluation.md).
 
 Written references: [docs/analyzers.md](docs/analyzers.md) (per-stage
 behavior, versions, gaps), [docs/artifacts.md](docs/artifacts.md) (output

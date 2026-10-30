@@ -267,7 +267,8 @@ Veja o [ADR-009](adr/009-decompiler-backends.md).
 ### Harness de avaliação (critérios de aceite)
 
 Implementado como `scripts/evaluate-decompiler.py <apk>` (runbook manual, fora
-do `go test`). Ele roda os dois backends em workdirs separados e emite tempo
+do `go test`); o status atual e o checklist da próxima execução ficam em
+[docs/decompiler-evaluation.md](decompiler-evaluation.md). Ele roda os dois backends em workdirs separados e emite tempo
 de parede, tempo do decompilador, RSS de pico, contagem de findings, recall
 por categoria+título+evidência, overlap de fingerprint estrito e notificações
 de erro do semgrep, além de PASS/FAIL para os critérios abaixo. Rodar os dois

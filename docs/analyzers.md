@@ -337,7 +337,8 @@ scripts/evaluate-decompiler.py app.apk --workdir targets/eval --json eval.json
 It records wall time, decompiler time, peak RSS, finding counts, recall by
 category+title+evidence, strict fingerprint overlap and semgrep error
 notifications, and prints the ADR-009 acceptance checks. See
-[ADR-009](adr/009-decompiler-backends.md). `dexdc` does not become the
+[ADR-009](adr/009-decompiler-backends.md) and the
+[evaluation runbook](decompiler-evaluation.md). `dexdc` does not become the
 default (`--fast`) until the differential result passes.
 
 ## What each flow needs

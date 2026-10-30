@@ -66,7 +66,9 @@ compare it with `jadx` on the same APK:
 | `--findrefs` on 20 known sinks | correct class/method |
 
 The harness is `scripts/evaluate-decompiler.py` (manual runbook, not part of
-the default `go test` path). It records wall time, decompiler time, peak RSS,
+the default `go test` path). See
+[docs/decompiler-evaluation.md](../decompiler-evaluation.md) for the current
+status, prerequisites and next-run checklist. It records wall time, decompiler time, peak RSS,
 finding counts, a category+title+evidence recall, strict fingerprint overlap
 and semgrep error notifications.
 
