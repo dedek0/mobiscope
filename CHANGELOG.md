@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `report.md` gains an attack-surface section (package/version/targetSdk,
   permissions, SDKs, native ABIs, network policy, signing).
 - LLM triage skips `info` findings, which are inventory/surface facts.
+- `scanPatterns` scans files with a bounded worker pool, skips vendor SDK
+  trees (the DEX scanner covers their strings) and keeps the `Needle`
+  prefilter before the regex engine.
+- Golden fixtures cover header-only PEM, complete/escaped PEM and client-side
+  identifiers; complete PEM blocks escaped as Java/Kotlin `\n` are now
+  detected and redacted.
 - CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
   findings; `--baseline <findings.json|session.json>` suppresses known ones
   before triage.

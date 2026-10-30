@@ -1,6 +1,7 @@
 package analyzers
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,4 +392,88 @@ func TestSourceRoot(t *testing.T) {
 	jadxDir := filepath.Join(dir, "jadx")
 	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
 	assert.Equal(t, jadxDir, SourceRoot(dir))
+}
+
+func TestScanPatterns_SkipsVendorTrees(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"sources/com/example/App.java":       `class A { String k = "AKIAIOSFODNN7EXAMPLE"; }`,
+		"sources/okhttp3/Config.java":        `class B { String k = "AKIAIOSFODNN7EXAMPLB"; }`,
+		"sources/com/google/firebase/X.java": `class C { String k = "AKIAIOSFODNN7EXAMPLC"; }`,
+	}
+	for rel, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+
+	findings, _ := NewInventory().scanPatterns(dir, "s")
+	var aws []models.Finding
+	for _, f := range findings {
+		if f.Title == "AWS Access Key" {
+			aws = append(aws, f)
+		}
+	}
+	require.Len(t, aws, 1)
+	assert.Equal(t, filepath.FromSlash("sources/com/example/App.java"), aws[0].Location.File)
+}
+
+func TestIsVendorPath(t *testing.T) {
+	assert.True(t, isVendorPath("sources/okhttp3/OkHttpClient.java"))
+	assert.True(t, isVendorPath("sources/com/google/firebase/Foo.java"))
+	assert.True(t, isVendorPath("sources/androidx/core/Foo.kt"))
+	assert.False(t, isVendorPath("sources/com/example/app/Main.java"))
+	assert.False(t, isVendorPath("AndroidManifest.xml"))
+}
+
+func TestScanPatterns_ParallelDeterministicOrder(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 20; i++ {
+		rel := filepath.Join("sources", "com", "example", fmt.Sprintf("F%02d.java", i))
+		path := filepath.Join(dir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(`class F { String k = "AKIAIOSFODNN7EXAMPLE"; }`), 0o600))
+	}
+	findings, _ := NewInventory().scanPatterns(dir, "s")
+	require.Len(t, findings, 20)
+	for i := 1; i < len(findings); i++ {
+		assert.LessOrEqual(t, findings[i-1].Location.File, findings[i].Location.File)
+	}
+}
+
+func TestGoldenFalsePositiveTraps(t *testing.T) {
+	findings, _ := NewInventory().scanPatterns("testdata/golden", "golden")
+	byTitle := map[string][]models.Finding{}
+	for _, f := range findings {
+		byTitle[f.Title] = append(byTitle[f.Title], f)
+	}
+
+	// Header-only PEM constants (JSch/Netty-style) must not produce a
+	// critical finding; the complete block must produce exactly one and be
+	// redacted.
+	keys := byTitle["Private Key Block"]
+	require.Len(t, keys, 1)
+	assert.Contains(t, keys[0].Evidence, "[body redacted]")
+	assert.NotContains(t, keys[0].Evidence, "AAAAAAAA")
+
+	// Client-side identifiers are informational, not critical secrets.
+	for _, title := range []string{"GCP API Key", "Google OAuth Client ID", "Firebase URL"} {
+		rows := byTitle[title]
+		require.Len(t, rows, 1, title)
+		assert.Equal(t, models.SeverityInfo, rows[0].Severity, title)
+		assert.Equal(t, models.SensitivityPublic, rows[0].Sensitivity, title)
+	}
+}
+
+func TestScanPatterns_EscapedPEMBlock(t *testing.T) {
+	dir := t.TempDir()
+	body := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+	java := `class K { static final String KEY = "-----BEGIN RSA PRIVATE KEY-----\n` + body + `\n-----END RSA PRIVATE KEY-----"; }`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "K.java"), []byte(java), 0o600))
+
+	findings, _ := NewInventory().scanPatterns(dir, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "Private Key Block", findings[0].Title)
+	assert.Contains(t, findings[0].Evidence, "redacted")
+	assert.NotContains(t, findings[0].Evidence, body)
 }

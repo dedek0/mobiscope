@@ -35,7 +35,8 @@ Known strengths:
 - Deterministic findings, dedup/clustering, SARIF and Markdown output.
 - Provider-agnostic LLM triage with a local secret gate.
 
-Known gaps are grouped below. P0, P1 and P2 are implemented; P3 is planned.
+Known gaps are grouped below. P0–P3 are implemented; the decompiler backend
+evaluation is the remaining planned work.
 
 ## P0 — signal quality (done)
 
@@ -198,7 +199,7 @@ decoded tree when the native parse fails. See
 - **Validate stage names.** (done) An unknown `--stages` entry now fails the
   run with the valid names for the detected platform.
 
-## P3 — performance and reporting
+## P3 — performance and reporting (done)
 
 - Stop running both decompilers in full by default. (done) The default is
   now `jadx` only; the native AXML/arsc parser covers manifest/resources/NSC,
@@ -206,8 +207,9 @@ decoded tree when the native parse fails. See
 - Cache decompiler output by APK SHA and offer `--reuse`. (done) The session
   directory is already SHA-keyed; `--reuse` skips a decompiler whose tree
   exists.
-- `scanPatterns`: (partial) rules carry a cheap `Needle` prefilter before the
-  regex engine; vendor-directory skipping and a parallel walk are still open.
+- `scanPatterns`: (done) rules carry a cheap `Needle` prefilter before the
+  regex engine; vendor SDK trees are skipped (the DEX scanner covers their
+  strings) and files are scanned by a bounded worker pool.
 - Report: (done) representatives plus counts, top clusters/categories and an
   attack-surface section (package/version/targetSdk, permissions, SDKs, native
   ABIs, network policy, signing). Deep-link/component lists are still derived
@@ -215,7 +217,9 @@ decoded tree when the native parse fails. See
 - Triage: (done) only representatives with severity ≥ `low` are sent; info
   findings are inventory/surface facts and skip the LLM.
 - Golden fixtures with the false-positive traps (PEM in parser code, Firebase
-  keys, multidex, zipalign timestamps) to lock the behavior.
+  keys, multidex, zipalign timestamps) to lock the behavior. (done) The
+  inventory golden fixture covers header-only PEM, complete/escaped PEM and
+  client-side identifiers; the repack tests cover multidex/zipalign.
 - Obfuscation depth: scoring string encryption beyond Base64 detection,
   server-side deobfuscation beyond the class/file mapping, and validating the
   v3 rotation lineage and source-stamp chains.
@@ -296,5 +300,5 @@ result is the decision input.
 3. P2 diff/baseline/CI gate (done).
 4. P2 Kotlin/taint, signing verification, native depth and SDK detection
    (done).
-5. Decompiler backend evaluation, then `--fast`.
-6. P3 performance/reporting.
+5. P3 performance/reporting (done).
+6. Decompiler backend evaluation, then `--fast`.

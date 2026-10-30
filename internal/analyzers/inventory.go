@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dedek0/mobiscope/internal/models"
@@ -333,7 +335,37 @@ var scanRules = []patternRule{
 }
 
 func (inv *Inventory) scanPatterns(dir string, sessionID string) ([]models.Finding, ScanAggregate) {
-	var findings []models.Finding
+	paths := collectScanFiles(dir)
+
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	jobs := make(chan string)
+	results := make(chan fileScanResult, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				results <- scanOneFile(dir, path, sessionID)
+			}
+		}()
+	}
+	go func() {
+		for _, path := range paths {
+			jobs <- path
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+
 	agg := ScanAggregate{}
 	urlSeen := make(map[string]bool, maxURLSamples)
 	ipSeen := make(map[string]bool, maxIPSamples)
@@ -341,140 +373,57 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) ([]models.Findi
 	pinSeen := make(map[string]bool, len(pinningMarkers))
 	firstPinFile, firstPinLine := "", 0
 
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		// Never follow symlinks: a malicious APK can plant a link to a host
-		// file and exfiltrate it into findings and LLM prompts.
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".java" && ext != ".smali" && ext != ".xml" && ext != ".kt" && ext != ".json" && ext != ".properties" && ext != ".cfg" {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err == nil && info.Size() > maxScanFileSize {
-			return nil
-		}
-
-		data, err := os.ReadFile(path) //nolint:gosec
-		if err != nil {
-			return nil
-		}
-
-		content := string(data)
-		relPath, _ := filepath.Rel(dir, path)
-
-		// Aggregate generic URLs: count every match, keep a bounded unique
-		// sample for inventory.json instead of one finding per URL.
-		for _, m := range urlRe.FindAllString(content, -1) {
-			agg.URLs.Count++
-			u := strings.TrimRight(m, ".,;:!?)]}")
+	var findings []models.Finding
+	for part := range results {
+		findings = append(findings, part.findings...)
+		agg.URLs.Count += part.urlCount
+		for _, u := range part.urls {
 			if !urlSeen[u] && len(urlSeen) < maxURLSamples {
 				urlSeen[u] = true
 				agg.URLs.URLs = append(agg.URLs.URLs, u)
 			}
 		}
-
-		// IPs and e-mail addresses are inherently low-signal in resources and
-		// third-party SDKs. They feed inventory.json, never the findings list.
-		for _, m := range ipRe.FindAllString(content, -1) {
-			agg.IPCount++
-			if !ipSeen[m] && len(ipSeen) < maxIPSamples {
-				ipSeen[m] = true
-				agg.IPs = append(agg.IPs, m)
+		agg.IPCount += part.ipCount
+		for _, ip := range part.ips {
+			if !ipSeen[ip] && len(ipSeen) < maxIPSamples {
+				ipSeen[ip] = true
+				agg.IPs = append(agg.IPs, ip)
 			}
 		}
-		for _, m := range emailRe.FindAllString(content, -1) {
-			agg.EmailCount++
-			if !emailSeen[m] && len(emailSeen) < maxEmailSamples {
-				emailSeen[m] = true
-				agg.Emails = append(agg.Emails, m)
+		agg.EmailCount += part.emailCount
+		for _, email := range part.emails {
+			if !emailSeen[email] && len(emailSeen) < maxEmailSamples {
+				emailSeen[email] = true
+				agg.Emails = append(agg.Emails, email)
 			}
 		}
-
-		// Pinning support is an app-level property: collect the markers and
-		// emit one informational finding, not one per occurrence.
-		for _, marker := range pinningMarkers {
-			n := strings.Count(content, marker)
-			if n == 0 {
-				continue
-			}
-			agg.PinningCount += n
+		agg.PinningCount += part.pinCount
+		for _, marker := range part.pinMarkers {
 			if pinSeen[marker] {
 				continue
 			}
 			pinSeen[marker] = true
 			agg.Pinning = append(agg.Pinning, marker)
-			if firstPinFile == "" {
-				firstPinFile = relPath
-				firstPinLine = lineOfOffset(content, strings.Index(content, marker))
+			if firstPinFile == "" || part.pinFile < firstPinFile ||
+				(part.pinFile == firstPinFile && part.pinLine < firstPinLine) {
+				firstPinFile, firstPinLine = part.pinFile, part.pinLine
 			}
 		}
-
-		for _, rule := range scanRules {
-			if rule.Needle != "" && !strings.Contains(content, rule.Needle) {
-				continue
-			}
-			locs := rule.Re.FindAllStringIndex(content, -1)
-			lineCursor := 1
-			matchEnd := 0
-			for _, loc := range locs {
-				// Incremental line count: matches arrive in order.
-				for i := matchEnd; i < loc[0]; i++ {
-					if content[i] == '\n' {
-						lineCursor++
-					}
-				}
-				matchEnd = loc[1]
-
-				raw := content[loc[0]:loc[1]]
-				if rule.Name == privateKeyRuleName && !validPEMBlock(raw) {
-					continue
-				}
-				snippet := raw
-				if rule.Redact {
-					snippet = redactPEM(raw)
-				}
-				if len(snippet) > 120 {
-					snippet = snippet[:120]
-				}
-				line := lineCursor
-
-				desc := rule.Description
-				if desc == "" {
-					desc = fmt.Sprintf("Pattern match for %s in %s", rule.Name, relPath)
-				}
-
-				f := models.Finding{
-					ID:          models.GenerateID(NameInventory, rule.Category, relPath, line, snippet),
-					SessionID:   sessionID,
-					SourceTool:  NameInventory,
-					Category:    rule.Category,
-					Platform:    models.PlatformAndroid,
-					Origin:      OriginForPath(relPath),
-					Title:       rule.Name,
-					Description: desc,
-					Evidence:    snippet,
-					Location:    models.Location{File: relPath, Line: line, Snippet: snippet},
-					Severity:    rule.Severity,
-					Sensitivity: rule.Sensitivity,
-					Confidence:  0.7,
-				}
-				findings = append(findings, f)
-			}
-		}
-		return nil
-	})
+	}
 
 	sort.Strings(agg.URLs.URLs)
 	sort.Strings(agg.IPs)
 	sort.Strings(agg.Emails)
 	sort.Strings(agg.Pinning)
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Location.File != findings[j].Location.File {
+			return findings[i].Location.File < findings[j].Location.File
+		}
+		if findings[i].Location.Line != findings[j].Location.Line {
+			return findings[i].Location.Line < findings[j].Location.Line
+		}
+		return findings[i].Evidence < findings[j].Evidence
+	})
 
 	if len(agg.Pinning) > 0 {
 		if firstPinFile == "" {
@@ -500,6 +449,198 @@ func (inv *Inventory) scanPatterns(dir string, sessionID string) ([]models.Findi
 	return findings, agg
 }
 
+// fileScanResult is the per-file output merged after the parallel walk.
+type fileScanResult struct {
+	findings []models.Finding
+
+	urls       []string
+	urlCount   int
+	ips        []string
+	ipCount    int
+	emails     []string
+	emailCount int
+
+	pinMarkers []string
+	pinCount   int
+	pinFile    string
+	pinLine    int
+}
+
+// collectScanFiles walks the tree once, skips symlinks and vendor SDK trees,
+// and returns the files the pattern scanner should read.
+func collectScanFiles(dir string) []string {
+	var paths []string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			rel, relErr := filepath.Rel(dir, path)
+			if relErr == nil && rel != "." && isVendorPath(rel) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".java" && ext != ".smali" && ext != ".xml" && ext != ".kt" &&
+			ext != ".json" && ext != ".properties" && ext != ".cfg" {
+			return nil
+		}
+		if info, statErr := d.Info(); statErr == nil && info.Size() > maxScanFileSize {
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	sort.Strings(paths)
+	return paths
+}
+
+// vendorPathPrefixes are third-party trees whose literals are already covered
+// by the DEX string scanner; scanning them again in source form mostly adds
+// duplicates and cost.
+var vendorPathPrefixes = []string{
+	"androidx/",
+	"com/google/firebase/",
+	"com/google/android/gms/",
+	"com/google/android/material/",
+	"com/google/gson/",
+	"com/google/common/",
+	"com/google/protobuf/",
+	"com/facebook/",
+	"kotlin/",
+	"kotlinx/",
+	"okhttp3/",
+	"okio/",
+	"retrofit2/",
+	"org/apache/",
+	"org/bouncycastle/",
+	"io/reactivex/",
+	"io/sentry/",
+	"com/squareup/",
+	"com/bumptech/",
+	"com/crashlytics/",
+}
+
+// isVendorPath reports whether a relative path lives under a known vendor tree.
+func isVendorPath(rel string) bool {
+	p := "/" + strings.ReplaceAll(rel, "\\", "/") + "/"
+	for _, prefix := range vendorPathPrefixes {
+		if strings.Contains(p, "/"+prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// scanOneFile runs the aggregate and rule patterns over one file.
+func scanOneFile(dir, path, sessionID string) fileScanResult {
+	result := fileScanResult{}
+	data, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		return result
+	}
+	content := string(data)
+	relPath, _ := filepath.Rel(dir, path)
+
+	urlSeen := make(map[string]bool, maxURLSamples)
+	for _, m := range urlRe.FindAllString(content, -1) {
+		result.urlCount++
+		u := strings.TrimRight(m, ".,;:!?)]}")
+		if !urlSeen[u] && len(result.urls) < maxURLSamples {
+			urlSeen[u] = true
+			result.urls = append(result.urls, u)
+		}
+	}
+	ipSeen := make(map[string]bool, maxIPSamples)
+	for _, m := range ipRe.FindAllString(content, -1) {
+		result.ipCount++
+		if !ipSeen[m] && len(result.ips) < maxIPSamples {
+			ipSeen[m] = true
+			result.ips = append(result.ips, m)
+		}
+	}
+	emailSeen := make(map[string]bool, maxEmailSamples)
+	for _, m := range emailRe.FindAllString(content, -1) {
+		result.emailCount++
+		if !emailSeen[m] && len(result.emails) < maxEmailSamples {
+			emailSeen[m] = true
+			result.emails = append(result.emails, m)
+		}
+	}
+
+	pinSeen := make(map[string]bool, len(pinningMarkers))
+	for _, marker := range pinningMarkers {
+		n := strings.Count(content, marker)
+		if n == 0 {
+			continue
+		}
+		result.pinCount += n
+		if pinSeen[marker] {
+			continue
+		}
+		pinSeen[marker] = true
+		result.pinMarkers = append(result.pinMarkers, marker)
+		line := lineOfOffset(content, strings.Index(content, marker))
+		if result.pinFile == "" || relPath < result.pinFile ||
+			(relPath == result.pinFile && line < result.pinLine) {
+			result.pinFile, result.pinLine = relPath, line
+		}
+	}
+
+	for _, rule := range scanRules {
+		if rule.Needle != "" && !strings.Contains(content, rule.Needle) {
+			continue
+		}
+		locs := rule.Re.FindAllStringIndex(content, -1)
+		lineCursor := 1
+		matchEnd := 0
+		for _, loc := range locs {
+			for i := matchEnd; i < loc[0]; i++ {
+				if content[i] == '\n' {
+					lineCursor++
+				}
+			}
+			matchEnd = loc[1]
+
+			raw := content[loc[0]:loc[1]]
+			if rule.Name == privateKeyRuleName && !validPEMBlock(raw) {
+				continue
+			}
+			snippet := raw
+			if rule.Redact {
+				snippet = redactPEM(raw)
+			}
+			if len(snippet) > 120 {
+				snippet = snippet[:120]
+			}
+			desc := rule.Description
+			if desc == "" {
+				desc = fmt.Sprintf("Pattern match for %s in %s", rule.Name, relPath)
+			}
+			result.findings = append(result.findings, models.Finding{
+				ID:          models.GenerateID(NameInventory, rule.Category, relPath, lineCursor, snippet),
+				SessionID:   sessionID,
+				SourceTool:  NameInventory,
+				Category:    rule.Category,
+				Platform:    models.PlatformAndroid,
+				Origin:      OriginForPath(relPath),
+				Title:       rule.Name,
+				Description: desc,
+				Evidence:    snippet,
+				Location:    models.Location{File: relPath, Line: lineCursor, Snippet: snippet},
+				Severity:    rule.Severity,
+				Sensitivity: rule.Sensitivity,
+				Confidence:  0.7,
+			})
+		}
+	}
+	return result
+}
+
 // lineOfOffset returns the 1-based line number of an offset.
 func lineOfOffset(content string, off int) int {
 	if off < 0 || off > len(content) {
@@ -512,6 +653,10 @@ func lineOfOffset(content string, off int) int {
 // base64 body. Header-only constants (the JSch/Netty false positive) fail
 // this check because they contain no footer.
 func validPEMBlock(block string) bool {
+	// Decompiled Java/Kotlin strings often carry the newlines escaped as the
+	// two characters \n; normalize them before looking for the base64 body.
+	block = strings.ReplaceAll(block, `\n`, "\n")
+	block = strings.ReplaceAll(block, `\r`, "")
 	lines := strings.Split(block, "\n")
 	if len(lines) < 3 {
 		return false

@@ -219,7 +219,9 @@ Details and known gaps:
   Caps: tree extensions
   `.java .smali .xml .kt .json .properties .cfg`, files <= 2 MiB
   (`maxScanFileSize`), DEX files <= 64 MiB and <= 500k strings, symlinks never
-  followed.
+  followed. The tree walk skips vendor SDK directories (AndroidX, Firebase,
+  GMS, OkHttp, Kotlin, …) because the DEX string scanner already covers their
+  literals, and processes the remaining files with a bounded worker pool.
   Generic URLs (`url_count`/`urls`), IPs (`ip_count`/`ips`), e-mails
   (`email_count`/`emails`) and pinning markers
   (`pinning_indicators`/`pinning_count`) are aggregate inventory data, not

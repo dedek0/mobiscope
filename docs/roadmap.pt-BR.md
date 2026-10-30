@@ -36,8 +36,8 @@ Pontos fortes:
 - Findings determinísticos, dedup/clustering, SARIF e Markdown.
 - Triage por LLM provider-agnostic com gate local para secrets.
 
-As lacunas estão agrupadas abaixo. P0, P1 e P2 estão implementados; o P3 é o
-plano.
+As lacunas estão agrupadas abaixo. P0–P3 estão implementados; a avaliação do
+backend de decompilação é o trabalho planejado restante.
 
 ## P0 — qualidade do sinal (feito)
 
@@ -198,7 +198,7 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - **Validar nomes de estágio.** (feito) Um `--stages` inválido agora falha
   listando os nomes válidos para a plataforma detectada.
 
-## P3 — performance e relatório
+## P3 — performance e relatório (feito)
 
 - Parar de rodar os dois decompiladores completos por padrão. (feito) O padrão
   agora é só `jadx`; o parser nativo de AXML/arsc cobre manifest/resources/NSC,
@@ -206,8 +206,9 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - Cachear saída de decompilador por SHA do APK e oferecer `--reuse`. (feito)
   A sessão já é keyed pelo SHA; `--reuse` pula o decompilador cuja árvore
   existe.
-- `scanPatterns`: (parcial) as regras têm um prefilter `Needle` barato antes
-  do regex; pular diretórios de vendor e paralelizar o walk continua aberto.
+- `scanPatterns`: (feito) as regras têm um prefilter `Needle` barato antes do
+  regex; árvores de SDK vendor são puladas (o scanner DEX cobre as strings) e
+  os arquivos são processados por um pool de workers limitado.
 - Relatório: (feito) representantes + contagens, top clusters/categorias e uma
   seção de superfície (pacote/versão/targetSdk, permissões, SDKs, ABIs
   nativas, política de rede, assinatura). Listas de componentes/deeplinks
@@ -216,7 +217,9 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
   findings info são fatos de inventário/superfície e não gastam LLM.
 - Fixtures golden com os traps de falso positivo (PEM em código de parser,
   chaves Firebase, multidex, timestamp de zipalign) para travar o
-  comportamento.
+  comportamento. (feito) A fixture do inventory cobre PEM só header, PEM
+  completo/escapado e identificadores client-side; os testes de repack cobrem
+  multidex/zipalign.
 - Profundidade de obfuscação: pontuar string encryption além da detecção de
   Base64, deobfuscação server-side além do mapeamento de classe/arquivo e
   validação das cadeias de rotação v3 e source stamp.
@@ -296,5 +299,5 @@ entrada da decisão.
 3. P2 diff/baseline/gate de CI (feito).
 4. P2 Kotlin/taint, verificação de assinatura, profundidade nativa e
    detecção de SDK (feito).
-5. Avaliação do backend de decompilação, depois `--fast`.
-6. P3 performance/relatório.
+5. P3 performance/relatório (feito).
+6. Avaliação do backend de decompilação, depois `--fast`.
