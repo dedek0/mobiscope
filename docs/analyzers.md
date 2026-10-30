@@ -148,7 +148,10 @@ Details and known gaps:
   rule's tags (untagged defaults to `critical`), confidence from entropy.
   Findings are marked `needs_llm_triage` + `representative`.
 - **semgrep** — rules from the embedded pack (`internal/rules/mastg/rules.yaml`,
-  29 rules); severity is the SARIF
+  41 rules: Java, Kotlin plus taint-mode rules for intent/deeplink → WebView,
+  SQL, file/exec, clipboard → log and intent redirection); the pack is
+  validated with `semgrep --validate` during the Docker image build. Severity
+  is the SARIF
   level (`error->critical`, `warning->medium`, `note/info->info`, else
   `low`), category from rule metadata with rule-id heuristics as fallback,
   confidence fixed `0.8`; `masvs`/`mastg`/`cwe` are read from the SARIF

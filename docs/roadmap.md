@@ -158,10 +158,13 @@ decoded tree when the native parse fails. See
 
 ## P2 — coverage
 
-- **Kotlin and taint.** The current semgrep pack is Java-only. Add Kotlin
-  rules and taint-mode rules (deeplink/intent/clipboard → WebView, SQL, file,
-  exec, log), Intent redirection, `ContentProvider.openFile` traversal,
-  mutable PendingIntent, clipboard and PII logging.
+- **Kotlin and taint.** (done) The pack has Kotlin-specific rules (hardcoded
+  secrets, `addJavascriptInterface`, sensitive logging, weak ciphers, SQL
+  concatenation) and taint-mode rules for intent/deeplink → WebView, SQL,
+  file and exec, clipboard → log, and intent redirection. It also covers
+  `ContentProvider.openFile` traversal and mutable PendingIntent (the generic
+  PendingIntent rule was tightened to require a missing `FLAG_IMMUTABLE`).
+  The Docker build now validates both packs with `semgrep --validate`.
 - **Native depth.** (done) `RegisterNatives` is flagged; `.so` files under
   `assets/` are inspected; `DT_SONAME`, Shannon entropy and packer signatures
   (UPX, 360 Jiagu, Tencent Legu, Alibaba, Bangcle, …) land in
@@ -170,9 +173,10 @@ decoded tree when the native parse fails. See
 - **SDK detection.** (partially done) Signatures now cover Huawei HMS,
   WeChat, Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter,
   Unity, Apache HttpClient, Bouncy Castle, SQLCipher, ZXing and the Kotlin
-  stdlib, in addition to the existing Firebase/OkHttp/Gson set. Version
-  recovery from `BuildConfig`/resources and native-only SDKs are still open;
-  without versions, `--osv` has little to match.
+  stdlib, in addition to the existing Firebase/OkHttp/Gson set. Versions are
+  now recovered from `META-INF/maven/*/pom.properties` (exact group/artifact
+  coordinates) and decoded string resources; `BuildConfig` recovery and
+  native-only SDKs are still open.
 - **Signing in Go.** (parse done) The APK Signing Block v2/v3/v3.1 is parsed
   in-process: scheme, signer count, certificate SHA-256 fingerprint, subject,
   validity and key algorithm/size, plus v1 presence and debug detection, so
@@ -276,7 +280,9 @@ result is the decision input.
 1. P0 (done) — make the report readable.
 2. P1 (done) — native manifest/DEX parsing, full NSC, targetSdk checks and
    finding origin.
-3. P2 diff/baseline/CI gate — make the tool usable in a pipeline.
-4. P2 Kotlin/taint, signing in Go and expanded SDK detection.
+3. P2 diff/baseline/CI gate (done).
+4. P2 Kotlin/taint, signing parse, native depth and SDK detection (done).
+   Still open in P2: obfuscation stage/`--mapping`, the allowlist and full
+   v2/v3 signature verification.
 5. Decompiler backend evaluation, then `--fast`.
 6. P3 performance/reporting.

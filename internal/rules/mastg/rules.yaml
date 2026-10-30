@@ -190,11 +190,16 @@ rules:
 
   - id: mastg-implicit-pendingintent
     patterns:
-      - pattern: |
-          PendingIntent.getActivity($CTX, $REQ, $INTENT, ...)
-    message: PendingIntent without explicit mutability flag; an attacker may add flags.
+      - pattern-either:
+          - pattern: PendingIntent.getActivity($CTX, $REQ, $INTENT, $FLAGS)
+          - pattern: PendingIntent.getBroadcast($CTX, $REQ, $INTENT, $FLAGS)
+          - pattern: PendingIntent.getService($CTX, $REQ, $INTENT, $FLAGS)
+      - metavariable-regex:
+          metavariable: $FLAGS
+          regex: (?i)^(?!.*IMMUTABLE)(.*FLAG_UPDATE_CURRENT.*|.*FLAG_CANCEL_CURRENT.*|.*FLAG_ONE_SHOT.*|0)$
+    message: PendingIntent without FLAG_IMMUTABLE; another app can modify the wrapped intent.
     severity: WARNING
-    languages: [java]
+    languages: [java, kotlin]
     metadata:
       category: code_pattern
       severity: WARNING
@@ -476,3 +481,230 @@ rules:
       masvs: MASVS-PLATFORM-1
       mastg: [MASTG-TEST-0059]
       reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  # -------------------------------------------------------------------------
+  # Kotlin coverage
+  # -------------------------------------------------------------------------
+
+  - id: mastg-kotlin-hardcoded-secret
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  val $KEY = "..."
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: (?i)(key|secret|token|pass|credential|api_key|apikey)
+          - patterns:
+              - pattern: |
+                  $PREFS.putString($KEY, "...")
+              - metavariable-regex:
+                  metavariable: $KEY
+                  regex: (?i)(key|secret|token|pass)
+    message: Hardcoded API key or secret detected in Kotlin source code.
+    severity: ERROR
+    languages: [kotlin]
+    metadata:
+      category: secret
+      severity: ERROR
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0008]
+      reference: https://mas.owasp.org/MASWE/MASWE-0008/
+
+  - id: mastg-kotlin-webview-jsinterface
+    patterns:
+      - pattern: |
+          $W.addJavascriptInterface(...)
+    message: addJavascriptInterface exposes a native object to JavaScript; with untrusted content this leads to RCE.
+    severity: ERROR
+    languages: [kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0046/
+
+  - id: mastg-kotlin-log-sensitive
+    patterns:
+      - pattern-regex: |-
+          (?i)Log\.(?:v|d|i)\s*\([^)]{0,300}?(?:password|passwd|secret|token|api[_-]?key|authorization|credential|otp\b)
+    message: Potentially sensitive value passed to Log.d/i/v; logs are readable by the user and on rooted devices.
+    severity: WARNING
+    languages: [kotlin]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-STORAGE-4
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0009/
+
+  - id: mastg-kotlin-weak-cipher
+    patterns:
+      - pattern-regex: |-
+          Cipher\.getInstance\s*\(\s*"(?:DES|DESede|DES/[^"]*|RC2|RC4|ARC4|RC4/[^"]*|AES/ECB[^"]*)"
+    message: The cipher is weak or uses ECB mode; use an authenticated mode such as GCM.
+    severity: ERROR
+    languages: [kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-CRYPTO-1
+      mastg: [MASTG-TEST-0063]
+      reference: https://mas.owasp.org/MASWE/MASWE-0020/
+
+  - id: mastg-kotlin-sql-concat
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $DB.rawQuery("..." + $X, ...)
+          - pattern: |
+              $DB.execSQL("..." + $X)
+    message: Potential SQL injection via string concatenation in Kotlin.
+    severity: ERROR
+    languages: [kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0058]
+      reference: https://mas.owasp.org/MASWE/MASWE-0019/
+
+  # -------------------------------------------------------------------------
+  # Taint-mode rules (Java and Kotlin)
+  # -------------------------------------------------------------------------
+
+  - id: mastg-taint-intent-to-webview
+    mode: taint
+    pattern-sources:
+      - pattern: $INTENT.getStringExtra(...)
+      - pattern: $INTENT.getDataString()
+      - pattern: $INTENT.getData()
+      - pattern: $ACTIVITY.getIntent().getDataString()
+    pattern-sinks:
+      - pattern: $WEBVIEW.loadUrl(...)
+      - pattern: $WEBVIEW.evaluateJavascript(...)
+      - pattern: $WEBVIEW.loadDataWithBaseURL(...)
+    message: Untrusted intent or deeplink data reaches a WebView; validate or allowlist the URL before loading it.
+    severity: ERROR
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0059]
+      reference: https://mas.owasp.org/MASWE/MASWE-0046/
+
+  - id: mastg-taint-intent-to-sql
+    mode: taint
+    pattern-sources:
+      - pattern: $INTENT.getStringExtra(...)
+      - pattern: $INTENT.getDataString()
+    pattern-sinks:
+      - pattern: $DB.rawQuery(...)
+      - pattern: $DB.execSQL(...)
+      - pattern: $DB.query(...)
+    message: Untrusted intent data reaches a SQL statement; use bind parameters instead of concatenation.
+    severity: ERROR
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0058]
+      reference: https://mas.owasp.org/MASWE/MASWE-0019/
+
+  - id: mastg-taint-intent-to-file
+    mode: taint
+    pattern-sources:
+      - pattern: $INTENT.getStringExtra(...)
+      - pattern: $INTENT.getDataString()
+    pattern-sinks:
+      - pattern: new File(...)
+      - pattern: new FileInputStream(...)
+      - pattern: new FileOutputStream(...)
+      - pattern: $CTX.openFileInput(...)
+      - pattern: $CTX.openFileOutput(...)
+    message: Untrusted intent data reaches a file path; normalize and confine the path before opening it.
+    severity: WARNING
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: WARNING
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+
+  - id: mastg-taint-intent-to-exec
+    mode: taint
+    pattern-sources:
+      - pattern: $INTENT.getStringExtra(...)
+      - pattern: $INTENT.getDataString()
+    pattern-sinks:
+      - pattern: Runtime.getRuntime().exec(...)
+      - pattern: new ProcessBuilder(...)
+    message: Untrusted intent data reaches process execution; this is a command injection surface.
+    severity: ERROR
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0073]
+      reference: https://mas.owasp.org/MASWE/MASWE-0058/
+
+  - id: mastg-taint-clipboard-to-log
+    mode: taint
+    pattern-sources:
+      - pattern: $CM.getPrimaryClip()
+      - pattern: $CLIP.getText()
+      - pattern: $CLIP.coerceToText(...)
+    pattern-sinks:
+      - pattern: Log.$M(...)
+      - pattern: System.out.println(...)
+      - pattern: println(...)
+    message: Clipboard content reaches a log sink; clipboard data often contains credentials, tokens or PII.
+    severity: WARNING
+    languages: [java, kotlin]
+    metadata:
+      category: privacy
+      severity: WARNING
+      masvs: MASVS-STORAGE-4
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0009/
+
+  - id: mastg-taint-intent-redirection
+    mode: taint
+    pattern-sources:
+      - pattern: $INTENT.getParcelableExtra(...)
+      - pattern: $INTENT.getParcelableArrayListExtra(...)
+    pattern-sinks:
+      - pattern: $CTX.startActivity(...)
+      - pattern: $CTX.startService(...)
+      - pattern: $CTX.sendBroadcast(...)
+    message: A Parcelable read from an intent is used to start another component; validate it to prevent intent redirection.
+    severity: ERROR
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-PLATFORM-1
+      mastg: [MASTG-TEST-0057]
+      reference: https://mas.owasp.org/MASWE/MASWE-0055/
+
+  - id: mastg-contentprovider-openfile-traversal
+    patterns:
+      - pattern-either:
+          - pattern: openFile($URI.getPath(), ...)
+          - pattern: openFile($URI.getLastPathSegment(), ...)
+          - pattern: ParcelFileDescriptor.open(new File($URI.getPath()), ...)
+    message: A ContentProvider derives a file path directly from the caller-supplied URI; canonicalize and confine it.
+    severity: ERROR
+    languages: [java, kotlin]
+    metadata:
+      category: code_pattern
+      severity: ERROR
+      masvs: MASVS-STORAGE-1
+      mastg: [MASTG-TEST-0011]
+      reference: https://mas.owasp.org/MASWE/MASWE-0007/
+

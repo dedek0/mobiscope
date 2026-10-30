@@ -460,3 +460,15 @@ func TestOriginForPath(t *testing.T) {
 	assert.Equal(t, "app", OriginForPath("sources/com/example/app/Main.java"))
 	assert.Equal(t, OriginSDKPrefix+"Firebase Crashlytics", OriginForPath("com/google/firebase/crashlytics/Foo.kt"))
 }
+
+func TestMavenVersionsFromArchive(t *testing.T) {
+	path := buildZipFile(t, filepath.Join(t.TempDir(), "libs.apk"), map[string]string{
+		"META-INF/maven/com.google.firebase/firebase-analytics/pom.properties": "version=21.5.0\nartifactId=firebase-analytics\n",
+		"META-INF/maven/com.squareup.okhttp3/okhttp/pom.properties":            "version=4.12.0\r\n",
+		"META-INF/maven/not/a/pom.txt":                                         "version=ignored\n",
+	})
+	versions := mavenVersionsFromArchive(path)
+	assert.Equal(t, "21.5.0", versions["com.google.firebase:firebase-analytics"])
+	assert.Equal(t, "4.12.0", versions["com.squareup.okhttp3:okhttp"])
+	assert.Len(t, versions, 2)
+}

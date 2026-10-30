@@ -121,6 +121,18 @@ func TestRulePacks_ExpectedRuleIDs(t *testing.T) {
 		"mastg-log-sensitive",
 		"mastg-weak-cipher-des-rc4",
 		"mastg-aes-ecb-default",
+		"mastg-kotlin-hardcoded-secret",
+		"mastg-kotlin-webview-jsinterface",
+		"mastg-kotlin-log-sensitive",
+		"mastg-kotlin-weak-cipher",
+		"mastg-kotlin-sql-concat",
+		"mastg-taint-intent-to-webview",
+		"mastg-taint-intent-to-sql",
+		"mastg-taint-intent-to-file",
+		"mastg-taint-intent-to-exec",
+		"mastg-taint-clipboard-to-log",
+		"mastg-taint-intent-redirection",
+		"mastg-contentprovider-openfile-traversal",
 	} {
 		assert.Contains(t, ids, want)
 	}

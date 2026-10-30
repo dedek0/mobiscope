@@ -314,13 +314,19 @@ func DetectSDKs(target, workdir string) []models.SDK {
 		}
 	}
 
-	versions := resourceVersions(workdir)
+	maven := mavenVersionsFromArchive(target)
+	resources := resourceVersions(workdir)
 	for name, sdk := range found {
+		if v := maven[sdk.Group+":"+sdk.Artifact]; v != "" {
+			sdk.Version = v
+			found[name] = sdk
+			continue
+		}
 		for _, sig := range sdkSignatures {
 			if sig.Name != name || sig.VersionResource == "" {
 				continue
 			}
-			if v, ok := versions[sig.VersionResource]; ok {
+			if v, ok := resources[sig.VersionResource]; ok {
 				sdk.Version = v
 				found[name] = sdk
 			}
@@ -367,6 +373,71 @@ func dexClassNamesFromArchive(target string) []string {
 		}
 	}
 	return names
+}
+
+// mavenVersionPrefix is where packaged libraries put pom.properties.
+const mavenVersionPrefix = "META-INF/maven/"
+
+// mavenVersionsFromArchive recovers group:artifact → version from the
+// META-INF/maven/*/pom.properties entries that many libraries ship inside the
+// APK. It works without a decompiler and gives --osv an exact version.
+func mavenVersionsFromArchive(target string) map[string]string {
+	out := map[string]string{}
+	zr, err := openZip(target)
+	if err != nil {
+		return out
+	}
+	defer zr.Close()
+
+	const maxPomBytes = 1 << 20
+	for _, f := range zr.File {
+		name := f.Name
+		if !strings.HasPrefix(name, mavenVersionPrefix) || !strings.HasSuffix(name, "/pom.properties") {
+			continue
+		}
+		if f.UncompressedSize64 > maxPomBytes {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := readAllLimited(rc, maxPomBytes)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		group, artifact := mavenCoordinates(name)
+		version := pomProperty(string(data), "version")
+		if group != "" && artifact != "" && version != "" {
+			out[group+":"+artifact] = version
+		}
+	}
+	return out
+}
+
+// mavenCoordinates parses META-INF/maven/<group>/<artifact>/pom.properties.
+func mavenCoordinates(name string) (group, artifact string) {
+	rest := strings.TrimPrefix(name, mavenVersionPrefix)
+	rest = strings.TrimSuffix(rest, "/pom.properties")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	artifact = parts[len(parts)-1]
+	group = strings.Join(parts[:len(parts)-1], ".")
+	return group, artifact
+}
+
+// pomProperty returns the value of a key in a .properties file.
+func pomProperty(content, key string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, key+"=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, key+"="))
+		}
+	}
+	return ""
 }
 
 // resourceVersions reads the decoded string resources of the session and

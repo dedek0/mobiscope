@@ -79,6 +79,14 @@ RUN python3 -m pip install --upgrade --no-cache-dir pip \
     && python3 -m pip install --no-cache-dir "semgrep==1.127.1" \
     && semgrep --version
 
+# Validate the embedded rule packs during the image build so an invalid rule
+# (which makes the whole pack unloadable) fails CI instead of silently
+# disabling the semgrep stage at runtime.
+COPY --from=builder /src/internal/rules /tmp/rules
+RUN semgrep --validate --config /tmp/rules/mastg/rules.yaml \
+    && semgrep --validate --config /tmp/rules/mastg-ios/rules.yaml \
+    && rm -rf /tmp/rules
+
 COPY --from=builder /mobiscope /usr/local/bin/mobiscope
 
 WORKDIR /app

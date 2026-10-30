@@ -157,10 +157,13 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 
 ## P2 — cobertura
 
-- **Kotlin e taint.** O pack atual é só Java. Adicionar regras Kotlin e regras
-  em modo taint (deeplink/intent/clipboard → WebView, SQL, arquivo, exec,
-  log), Intent redirection, `ContentProvider.openFile` traversal, PendingIntent
-  mutável, clipboard e log de PII.
+- **Kotlin e taint.** (feito) O pack ganhou regras Kotlin (segredos
+  hardcoded, `addJavascriptInterface`, log sensível, cifras fracas,
+  concatenação em SQL) e regras em modo taint para intent/deeplink → WebView,
+  SQL, arquivo e exec, clipboard → log e intent redirection. Também cobre
+  `ContentProvider.openFile` traversal e PendingIntent mutável (a regra
+  genérica foi endurecida para exigir `FLAG_IMMUTABLE` ausente). O build
+  Docker agora valida os dois packs com `semgrep --validate`.
 - **Profundidade nativa.** (feito) `RegisterNatives` é sinalizado; `.so` em
   `assets/` é inspecionado; `DT_SONAME`, entropia de Shannon e assinaturas de
   packers (UPX, 360 Jiagu, Tencent Legu, Alibaba, Bangcle, …) entram em
@@ -170,9 +173,10 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 - **Detecção de SDK.** (parcial) As assinaturas agora cobrem Huawei HMS,
   WeChat, Bugly, MMKV, Alipay, Umeng, JPush, Baidu, Play Billing, Flutter,
   Unity, Apache HttpClient, Bouncy Castle, SQLCipher, ZXing e a stdlib Kotlin,
-  além do conjunto Firebase/OkHttp/Gson. Recuperar versão via
-  `BuildConfig`/resources e SDKs native-only continua aberto. Sem versão, o
-  `--osv` tem pouco para casar.
+  além do conjunto Firebase/OkHttp/Gson. As versões agora vêm de
+  `META-INF/maven/*/pom.properties` (coordenadas group/artifact exatas) e dos
+  string resources decodificados; recuperar via `BuildConfig` e SDKs
+  native-only continua aberto.
 - **Assinatura em Go.** (parse feito) O APK Signing Block v2/v3/v3.1 é lido
   in-process: scheme, número de signers, fingerprint SHA-256 do certificado,
   subject, validade e algoritmo/tamanho de chave, além da presença de v1 e
@@ -277,7 +281,9 @@ entrada da decisão.
 1. P0 (feito) — tornar o relatório legível.
 2. P1 (feito) — parse nativo de manifest/DEX, NSC completo, checks de
    targetSdk e origem do finding.
-3. P2 diff/baseline/gate de CI — tornar a ferramenta usável em pipeline.
-4. P2 Kotlin/taint, assinatura em Go e detecção de SDK ampliada.
+3. P2 diff/baseline/gate de CI (feito).
+4. P2 Kotlin/taint, parse de assinatura, profundidade nativa e detecção de SDK
+   (feito). Continua aberto no P2: estágio de obfuscação/`--mapping`,
+   allowlist e verificação completa de assinatura v2/v3.
 5. Avaliação do backend de decompilação, depois `--fast`.
 6. P3 performance/relatório.

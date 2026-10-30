@@ -42,7 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packer signatures and `RegisterNatives` detection.
 - More SDK signatures: Huawei HMS, WeChat, Bugly, MMKV, Alipay, Umeng, JPush,
   Baidu, Play Billing, Flutter, Unity, Apache HttpClient, Bouncy Castle,
-  SQLCipher, ZXing and the Kotlin stdlib.
+  SQLCipher, ZXing and the Kotlin stdlib. Versions are recovered from
+  `META-INF/maven/*/pom.properties` as well as decoded string resources.
+- Semgrep Android pack: Kotlin rules plus taint-mode coverage for
+  intent/deeplink → WebView, SQL, file and exec, clipboard → log and intent
+  redirection; `ContentProvider.openFile` traversal and a tightened mutable
+  `PendingIntent` rule. 41 rules total, validated during the Docker build.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the
