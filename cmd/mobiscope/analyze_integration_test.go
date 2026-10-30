@@ -72,8 +72,10 @@ func TestAnalyzeCLI_DefaultStages(t *testing.T) {
 	require.NoError(t, err)
 
 	tools := invokedTools(readStubLog(t, logPath))
-	assert.Contains(t, tools, "apktool")
+	// The default is jadx only; apktool is covered by the in-process reader
+	// and is opt-in via --stages/--decompiler.
 	assert.Contains(t, tools, "jadx")
+	assert.NotContains(t, tools, "apktool")
 	// Default stages never include the scanners.
 	assert.NotContains(t, tools, "gitleaks")
 	assert.NotContains(t, tools, "semgrep")
