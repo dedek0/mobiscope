@@ -100,7 +100,7 @@ func withStubPATH(t *testing.T, dir string) {
 	})
 }
 
-// --- buildAnalyzers (PENDING §3, cmd coverage) ---
+// --- buildAnalyzers (cmd coverage) ---
 
 func TestBuildAnalyzers_AndroidDefaults(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, androidTarget())
@@ -476,7 +476,7 @@ model = "fake-model-1"
 	assert.GreaterOrEqual(t, bad.chatCalls.Load(), int64(1))
 }
 
-// --- --expect-sha256 gate (PENDING §2.4) ---
+// --- --expect-sha256 gate ---
 
 // TestAnalyze_ExpectSHA256Gate verifies the hash gate runs before any
 // analyzer: a mismatch must abort without creating the session directory, a

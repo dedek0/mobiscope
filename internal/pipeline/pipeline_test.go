@@ -296,3 +296,13 @@ func TestPipeline_shouldRunInventory(t *testing.T) {
 	assert.True(t, p.shouldRunInventory([]string{"inventory", "jadx"}))
 	assert.False(t, p.shouldRunInventory([]string{"jadx"}))
 }
+
+func TestPipeline_filterAnalyzers_NormalizesStageNames(t *testing.T) {
+	p := New([]analyzers.Analyzer{analyzers.NewAntiAnalysis()}, slog.Default())
+
+	for _, stage := range []string{"anti-analysis", "anti_analysis", " anti-analysis "} {
+		got := p.filterAnalyzers([]string{stage})
+		require.Len(t, got, 1, "stage %q must select the anti-analysis analyzer", stage)
+		assert.Equal(t, "anti_analysis", got[0].Name())
+	}
+}

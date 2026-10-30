@@ -296,11 +296,11 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	}
 
 	// Phase 3: inventory analyzer (no external binary).
-	var urlAgg analyzers.URLAggregate
+	var scanAgg analyzers.ScanAggregate
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
 		invFindings, agg := p.runInventory(plat, sessionDir, session.ID)
-		urlAgg = agg
+		scanAgg = agg
 		session.Findings = append(session.Findings, invFindings...)
 		invDur := time.Since(invStart)
 		p.logger.Info("inventory analysis complete", "findings", len(invFindings))
@@ -336,8 +336,14 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 
 	// Phase 3b: inventory.json with structured app facts.
 	session.App = p.collectAppInventory(plat, sessionDir, runs)
-	session.App.URLCount = urlAgg.Count
-	session.App.URLs = urlAgg.URLs
+	session.App.URLCount = scanAgg.URLs.Count
+	session.App.URLs = scanAgg.URLs.URLs
+	session.App.IPCount = scanAgg.IPCount
+	session.App.IPs = scanAgg.IPs
+	session.App.EmailCount = scanAgg.EmailCount
+	session.App.Emails = scanAgg.Emails
+	session.App.PinningIndicators = scanAgg.Pinning
+	session.App.PinningCount = scanAgg.PinningCount
 	if session.App.BundleID != "" {
 		session.PackageName = session.App.BundleID
 		session.VersionName = session.App.VersionName
@@ -567,6 +573,7 @@ func (p *Pipeline) collectAppInventory(plat models.Platform, sessionDir string, 
 	}
 	inv.NativeLibs = analyzers.NativeLibsFromRuns(toolResults)
 	inv.SDKs = analyzers.SDKsFromRuns(toolResults)
+	inv.Obfuscation = analyzers.ObfuscationFromRuns(toolResults)
 	return inv
 }
 
@@ -593,14 +600,14 @@ func (p *Pipeline) collectSigning(plat models.Platform, apkPath string, runs []a
 }
 
 // runInventory dispatches to the platform-appropriate inventory analyzer and
-// returns its findings plus the Android URL aggregate (zero on iOS).
-func (p *Pipeline) runInventory(plat models.Platform, sessionDir, sessionID string) ([]models.Finding, analyzers.URLAggregate) {
+// returns its findings plus the Android scan aggregate (zero on iOS).
+func (p *Pipeline) runInventory(plat models.Platform, sessionDir, sessionID string) ([]models.Finding, analyzers.ScanAggregate) {
 	if plat == models.PlatformIOS {
-		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID), analyzers.URLAggregate{}
+		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID), analyzers.ScanAggregate{}
 	}
 	inv := analyzers.NewInventory()
 	findings := inv.Analyze(sessionDir, sessionID)
-	return findings, inv.URLAggregate()
+	return findings, inv.Aggregate()
 }
 
 func (p *Pipeline) convertFindings(a analyzers.Analyzer, result models.ToolResult, sessionID string) []models.Finding {
@@ -632,16 +639,23 @@ func (p *Pipeline) filterAnalyzers(stages []string) []analyzers.Analyzer {
 
 	stageSet := make(map[string]bool, len(stages))
 	for _, s := range stages {
-		stageSet[s] = true
+		stageSet[normalizeStageName(s)] = true
 	}
 
 	var filtered []analyzers.Analyzer
 	for _, a := range p.analyzers {
-		if stageSet[a.Name()] {
+		if stageSet[normalizeStageName(a.Name())] {
 			filtered = append(filtered, a)
 		}
 	}
 	return filtered
+}
+
+// normalizeStageName makes stage selection tolerant to the hyphen/underscore
+// difference between the CLI spelling (`anti-analysis`) and the analyzer
+// identifier (`anti_analysis`).
+func normalizeStageName(s string) string {
+	return strings.ReplaceAll(strings.TrimSpace(s), "-", "_")
 }
 
 func persistMeta(path string, meta *Meta) error {

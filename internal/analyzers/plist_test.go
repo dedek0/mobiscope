@@ -30,7 +30,7 @@ func findingBySubstring(findings []models.Finding, substr string) *models.Findin
 }
 
 // TestConvertPlistFindings_ATSMatrix walks the full NSAppTransportSecurity
-// matrix from PENDING §1.4/§1.7 and pins severity per case.
+// matrix and pins severity per case.
 func TestConvertPlistFindings_ATSMatrix(t *testing.T) {
 	tests := []struct {
 		name      string

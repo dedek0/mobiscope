@@ -149,6 +149,36 @@ func ConvertAntiAnalysisFindings(raw []byte, sessionID string) []models.Finding 
 	return findings
 }
 
+// ObfuscationFromRuns extracts the obfuscation facts recorded by the
+// anti-analysis stage, for inventory.json. It returns the zero value when the
+// stage did not run or produced no usable output.
+func ObfuscationFromRuns(results []models.ToolResult) models.ObfuscationInfo {
+	for _, r := range results {
+		if r.ToolName != antiAnalysisName || len(r.Output) == 0 {
+			continue
+		}
+		var out antiAnalysisSummary
+		if err := json.Unmarshal(r.Output, &out); err != nil {
+			continue
+		}
+		info := models.ObfuscationInfo{
+			Android: true,
+			Score:   out.ObfuscatedRatio,
+		}
+		if out.ClassCount > 0 {
+			info.Indicators = append(info.Indicators, fmt.Sprintf("classes=%d", out.ClassCount))
+		}
+		if out.Toolchain != "" {
+			info.Indicators = append(info.Indicators, "toolchain="+out.Toolchain)
+		}
+		if out.Obfuscated {
+			info.Indicators = append(info.Indicators, fmt.Sprintf("short_class_names=%.0f%%", out.ObfuscatedRatio*100))
+		}
+		return info
+	}
+	return models.ObfuscationInfo{}
+}
+
 // analyze scans the target archive and returns the summary.
 func (a *AntiAnalysis) analyze(target string) antiAnalysisSummary {
 	summary := antiAnalysisSummary{}
@@ -164,12 +194,25 @@ func (a *AntiAnalysis) analyze(target string) antiAnalysisSummary {
 
 	for _, f := range zr.File {
 		name := f.Name
-		if f.UncompressedSize64 > maxDexBytes {
-			continue
-		}
 		isDex := strings.HasPrefix(name, "classes") && strings.HasSuffix(name, ".dex")
 		isAsset := strings.HasPrefix(name, "assets/")
 		if !isDex && !isAsset {
+			continue
+		}
+
+		if isAsset {
+			if tool := detectObfuscatorAsset(name); tool != "" {
+				summary.Toolchain = tool
+			}
+			// Assets are mostly data (Unity metadata, models, fonts). Scan
+			// only payloads that can actually execute, otherwise generic
+			// words in a data blob produce instrumentation false positives.
+			if !isExecutableAsset(name) {
+				continue
+			}
+		}
+
+		if f.UncompressedSize64 > maxDexBytes {
 			continue
 		}
 
@@ -199,12 +242,6 @@ func (a *AntiAnalysis) analyze(target string) antiAnalysisSummary {
 			seenMarker[key] = true
 			marker.Source = name
 			summary.Markers = append(summary.Markers, marker)
-		}
-
-		if isAsset {
-			if tool := detectObfuscatorAsset(name); tool != "" {
-				summary.Toolchain = tool
-			}
 		}
 	}
 
@@ -247,10 +284,6 @@ var antiAnalysisPatterns = []antiMarkerPattern{
 	{
 		needle: "test-keys", kind: markerRoot, title: "App checks for a test-signed build", sev: models.SeverityLow,
 		desc: "The app inspects the build signature for the test-keys marker, a common root heuristic.",
-	},
-	{
-		needle: "su", kind: markerRoot, title: titleRootDetected, sev: models.SeverityInfo,
-		desc: "The app looks for the su binary, so it is aware of rooted devices.",
 	},
 
 	{
@@ -301,10 +334,6 @@ var antiAnalysisPatterns = []antiMarkerPattern{
 
 	{
 		needle: markerFrida, kind: markerFrida, title: titleFridaDetected, sev: models.SeverityHigh,
-		desc: "The app references Frida, the most common runtime instrumentation framework for Android.",
-	},
-	{
-		needle: "gadget", kind: markerFrida, title: titleFridaDetected, sev: models.SeverityHigh,
 		desc: "The app references Frida, the most common runtime instrumentation framework for Android.",
 	},
 	{
@@ -386,6 +415,14 @@ func scanAntiAnalysisMarkers(data []byte) []antiMarker {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
 	return out
+}
+
+// isExecutableAsset reports whether an asset can carry executable code that
+// the anti-analysis string scan should inspect.
+func isExecutableAsset(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".dex") || strings.HasSuffix(lower, ".jar") ||
+		strings.HasSuffix(lower, ".so") || strings.HasSuffix(lower, ".apk")
 }
 
 // detectObfuscatorAsset recognises the artifacts an obfuscator leaves in the

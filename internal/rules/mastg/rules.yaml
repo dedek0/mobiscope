@@ -101,6 +101,9 @@ rules:
     message: Component is exported and can be invoked by other applications.
     severity: INFO
     languages: [generic]
+    paths:
+      include:
+        - "**/AndroidManifest.xml"
     metadata:
       category: manifest_issue
       severity: INFO
@@ -141,11 +144,22 @@ rules:
 
   - id: mastg-trustmanager-bypass
     patterns:
-      - pattern: |
-          public void checkServerTrusted(X509Certificate[] $CHAIN, String $AUTH) {
-              ...
-          }
-    message: TrustManager implementation does not validate certificates (empty checkServerTrusted).
+      - pattern-either:
+          - pattern: |
+              public void checkServerTrusted(X509Certificate[] $CHAIN, String $AUTH) {
+              }
+          - pattern: |
+              public void checkServerTrusted(X509Certificate[] $CHAIN, String $AUTH) {
+                  return;
+              }
+          - pattern: |
+              public void checkClientTrusted(X509Certificate[] $CHAIN, String $AUTH) {
+              }
+          - pattern: |
+              public void checkClientTrusted(X509Certificate[] $CHAIN, String $AUTH) {
+                  return;
+              }
+    message: TrustManager implementation does not validate certificates (empty trust check).
     severity: ERROR
     languages: [java]
     metadata:
@@ -165,7 +179,7 @@ rules:
           - pattern: |
               $W.getSettings().setAllowFileAccessFromFileURLs(true)
     message: WebView file access from file URLs is enabled; a compromised WebView can read app-private files.
-    severity: HIGH
+    severity: ERROR
     languages: [java]
     metadata:
       category: code_pattern
@@ -311,9 +325,12 @@ rules:
 
   - id: mastg-webview-ssl-error
     patterns:
-      - pattern-either:
-          - pattern: $W.onReceivedSslError($V, $E, $H)
-          - pattern: $H.proceed()
+      - pattern: |
+          public void onReceivedSslError(WebView $W, SslErrorHandler $H, SslError $E) {
+            ...
+            $H.proceed();
+            ...
+          }
     message: The WebView continues past an SSL error, which defeats TLS validation for the whole view.
     severity: ERROR
     languages: [java]
@@ -359,8 +376,6 @@ rules:
   - id: mastg-storage-world-accessible
     patterns:
       - pattern-either:
-          - pattern: $X.openFileOutput(..., $M)
-          - pattern: $X.getSharedPreferences(..., $M)
           - pattern: MODE_WORLD_READABLE
           - pattern: MODE_WORLD_WRITEABLE
     message: The file or preference is opened in world-readable or world-writable mode, so any app on the device can read or modify it.
@@ -391,9 +406,7 @@ rules:
 
   - id: mastg-crypto-hardcoded-key
     patterns:
-      - pattern-either:
-          - pattern: new SecretKeySpec("...", ...)
-          - pattern: new SecretKeySpec($B, ...)
+      - pattern: new SecretKeySpec("...", ...)
     message: A cryptographic key is built from a literal, so it is recoverable from the binary.
     severity: ERROR
     languages: [java]
@@ -406,9 +419,8 @@ rules:
 
   - id: mastg-crypto-no-padding
     patterns:
-      - pattern-either:
-          - pattern: Cipher.getInstance("...", "NoPadding")
-          - pattern: Cipher.getInstance("NoPadding")
+      - pattern-regex: |-
+          Cipher\.getInstance\s*\(\s*"[^"]*NoPadding[^"]*"
     message: The cipher uses NoPadding, which removes the protection padding provides against padding-oracle attacks.
     severity: WARNING
     languages: [java]
@@ -422,7 +434,7 @@ rules:
   - id: mastg-crypto-pbe-weak
     patterns:
       - pattern-either:
-          - pattern: $PBEKeySpec(...)
+          - pattern: new PBEKeySpec(...)
           - pattern: SecretKeyFactory.getInstance("PBKDF...")
     message: A password-based key derivation is used; check that the iteration count is high enough for the platform.
     severity: INFO

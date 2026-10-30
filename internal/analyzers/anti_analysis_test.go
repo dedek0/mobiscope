@@ -168,3 +168,35 @@ func TestAntiAnalysis_RunOnArchive(t *testing.T) {
 func jsonUnmarshal(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
+
+func TestObfuscationFromRuns(t *testing.T) {
+	results := []models.ToolResult{{
+		ToolName: antiAnalysisName,
+		Output:   json.RawMessage(`{"class_count":100,"obfuscated_ratio":0.75,"obfuscated":true,"toolchain":"R8/ProGuard"}`),
+	}}
+
+	info := ObfuscationFromRuns(results)
+	assert.True(t, info.Android)
+	assert.Equal(t, 0.75, info.Score)
+	assert.Contains(t, info.Indicators, "classes=100")
+	assert.Contains(t, info.Indicators, "toolchain=R8/ProGuard")
+	assert.Contains(t, info.Indicators, "short_class_names=75%")
+}
+
+func TestAntiAnalysis_IgnoresGenericWordsAndDataAssets(t *testing.T) {
+	assert.Empty(t, scanAntiAnalysisMarkers([]byte("result user issue")))
+
+	path := buildZipFile(t, filepath.Join(t.TempDir(), "app.apk"), map[string]string{
+		"classes.dex":         "dex",
+		"assets/metadata.dat": "frida gadget /system/bin/su",
+		"assets/payload.dex":  "frida",
+	})
+	summary := NewAntiAnalysis().analyze(path)
+
+	sources := make([]string, 0, len(summary.Markers))
+	for _, m := range summary.Markers {
+		sources = append(sources, m.Source)
+	}
+	assert.NotContains(t, sources, "assets/metadata.dat")
+	assert.Contains(t, sources, "assets/payload.dex")
+}

@@ -16,28 +16,28 @@ const repackName = "repack"
 const NameRepack = repackName
 
 // Repack inspects the archive for the signals that a build was repackaged:
-// a debug certificate, a certificate that does not match the package, extra
-// DEX files, payloads hidden in assets and a uniform timestamp across every
-// entry.
+// a certificate that does not match the expected one, executable payloads
+// hidden in assets, and native libraries loaded from assets. Multidex, a
+// v2/v3-only signature and a normalized ZIP timestamp are normal for modern
+// apps and are not reported.
 //
 // The checks are deliberately conservative: each one reports what it saw and
 // how strong the signal is, and the LLM triage stage is what turns the
 // collection into a verdict.
 type Repack struct {
-	runner CommandRunner
 	// expectedCert is the fingerprint the operator expects, if any. It is
-	// compared with the certificate found in the archive.
+	// compared with the certificate found by the apksigner stage.
 	expectedCert string
 }
 
 func NewRepack() *Repack {
-	return &Repack{runner: &DefaultCommandRunner{}}
+	return &Repack{}
 }
 
 // NewRepackWithExpectedCert returns a Repack analyzer that compares the
 // signing certificate against the expected fingerprint.
 func NewRepackWithExpectedCert(fingerprint string) *Repack {
-	return &Repack{runner: &DefaultCommandRunner{}, expectedCert: fingerprint}
+	return &Repack{expectedCert: fingerprint}
 }
 
 func (r *Repack) Name() string { return repackName }
@@ -75,8 +75,6 @@ type repackSummary struct {
 	ActualCert string `json:"actual_cert,omitempty"`
 	// CertMatches is true when the expected and actual fingerprints agree.
 	CertMatches bool `json:"cert_matches"`
-	// SignatureScheme is the scheme reported by the apksigner stage.
-	SignatureScheme string `json:"signature_scheme,omitempty"`
 }
 
 // repackIndicator is one repackaging signal.
@@ -137,6 +135,11 @@ func ConvertRepackFindings(raw []byte, sessionID string) []models.Finding {
 }
 
 // analyze inspects the archive and returns the summary.
+//
+// Only signals that actually distinguish a repackaged build are reported.
+// Multidex, a v2/v3-only signature and a normalized ZIP timestamp are normal
+// for modern apps and were deliberately removed: they produced a finding on
+// nearly every real target.
 func (r *Repack) analyze(target string) repackSummary {
 	summary := repackSummary{ExpectedCert: r.expectedCert}
 
@@ -146,76 +149,41 @@ func (r *Repack) analyze(target string) repackSummary {
 	}
 	defer zr.Close()
 
-	var dexFiles []string
-	var assetPayloads []string
-	var signatureBlocks []string
-	timestamps := map[int64]int{}
+	var executablePayloads []string
+	var nativePayloads []string
 
 	for _, f := range zr.File {
 		name := f.Name
-		timestamps[f.Modified.Unix()]++
-
+		if !strings.HasPrefix(name, "assets/") {
+			continue
+		}
+		lower := strings.ToLower(name)
 		switch {
-		case strings.HasPrefix(name, "classes") && strings.HasSuffix(name, ".dex"):
-			dexFiles = append(dexFiles, name)
-		case strings.HasPrefix(name, "META-INF/") &&
-			(strings.HasSuffix(strings.ToUpper(name), ".RSA") ||
-				strings.HasSuffix(strings.ToUpper(name), ".DSA") ||
-				strings.HasSuffix(strings.ToUpper(name), ".EC")):
-			signatureBlocks = append(signatureBlocks, name)
-		case strings.HasPrefix(name, "assets/"):
-			lower := strings.ToLower(name)
-			if strings.HasSuffix(lower, ".dex") || strings.HasSuffix(lower, ".jar") ||
-				strings.HasSuffix(lower, ".so") || strings.HasSuffix(lower, ".apk") {
-				assetPayloads = append(assetPayloads, name)
-			}
+		case strings.HasSuffix(lower, ".dex"), strings.HasSuffix(lower, ".jar"),
+			strings.HasSuffix(lower, ".apk"):
+			executablePayloads = append(executablePayloads, name)
+		case strings.HasSuffix(lower, ".so"):
+			nativePayloads = append(nativePayloads, name)
 		}
 	}
 
-	// More than one DEX file in the root of the archive is unusual: a
-	// multi-dex build is declared in the manifest, a repackaged build
-	// usually just drops an extra file in.
-	if len(dexFiles) > 1 {
-		summary.Indicators = append(summary.Indicators, repackIndicator{
-			Kind:        "extra-dex",
-			Title:       "Archive carries more than one DEX file",
-			Description: "The archive contains " + strings.Join(dexFiles, ", ") + ". Extra DEX files are a common way to inject code into a repackaged build; check that the manifest declares a multidex setup.",
-			Evidence:    strings.Join(dexFiles, ","),
-			Severity:    models.SeverityMedium,
-			Confidence:  0.6,
-		})
-	}
-
-	if len(assetPayloads) > 0 {
+	if len(executablePayloads) > 0 {
 		summary.Indicators = append(summary.Indicators, repackIndicator{
 			Kind:        "asset-payload",
 			Title:       "Executable payload shipped in assets",
-			Description: "The archive ships " + strings.Join(assetPayloads, ", ") + " under assets/. A DEX, JAR or ELF file in assets is usually loaded at runtime, which hides it from a static review.",
-			Evidence:    strings.Join(assetPayloads, ","),
+			Description: "The archive ships " + strings.Join(executablePayloads, ", ") + " under assets/. A DEX, JAR or APK file in assets is usually loaded at runtime, which hides it from a static review.",
+			Evidence:    strings.Join(executablePayloads, ","),
 			Severity:    models.SeverityHigh,
 			Confidence:  0.7,
 		})
 	}
 
-	if len(signatureBlocks) == 0 {
+	if len(nativePayloads) > 0 {
 		summary.Indicators = append(summary.Indicators, repackIndicator{
-			Kind:        "no-signature",
-			Title:       "Archive carries no v1 signature block",
-			Description: "No META-INF signature block was found. The APK may be signed only with a v2/v3 block, or it may have been stripped.",
-			Evidence:    "no META-INF/*.RSA",
-			Severity:    models.SeverityMedium,
-			Confidence:  0.5,
-		})
-	}
-
-	// A repackaging tool usually rewrites every entry with the same
-	// timestamp, while a build keeps a range of them.
-	if len(timestamps) == 1 && len(zr.File) > 5 {
-		summary.Indicators = append(summary.Indicators, repackIndicator{
-			Kind:        "uniform-timestamp",
-			Title:       "Every archive entry carries the same timestamp",
-			Description: "All entries share one modification time, which is what a repackaging or archive-rewriting tool produces. A build normally leaves a range of timestamps.",
-			Evidence:    fmt.Sprintf("%d entries, 1 distinct timestamp", len(zr.File)),
+			Kind:        "asset-native-library",
+			Title:       "Native library shipped in assets",
+			Description: "The archive ships " + strings.Join(nativePayloads, ", ") + " under assets/. Loading a .so from app-private assets is legitimate for some SDKs, but it bypasses the normal lib/<abi> loading path and deserves a look.",
+			Evidence:    strings.Join(nativePayloads, ","),
 			Severity:    models.SeverityLow,
 			Confidence:  0.5,
 		})

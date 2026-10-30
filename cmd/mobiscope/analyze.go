@@ -418,7 +418,7 @@ func (o stageOptions) stageEnabled(name string) bool {
 	}
 	named := false
 	for _, s := range o.stages {
-		if s == name {
+		if stageKey(s) == stageKey(name) {
 			named = true
 			break
 		}
@@ -427,6 +427,13 @@ func (o stageOptions) stageEnabled(name string) bool {
 		return named
 	}
 	return len(o.stages) == 0 || named
+}
+
+// stageKey makes `--stages` tolerant to the hyphen/underscore difference
+// between the CLI spelling (`anti-analysis`) and the analyzer identifier
+// (`anti_analysis`).
+func stageKey(s string) string {
+	return strings.ReplaceAll(strings.TrimSpace(s), "-", "_")
 }
 
 // rulePackPath resolves the semgrep rule pack: the explicit override when

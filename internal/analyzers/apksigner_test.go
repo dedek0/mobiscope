@@ -108,7 +108,7 @@ func TestMetaInfHeuristic_NotAZip(t *testing.T) {
 
 	scheme, _, signerCount := metaInfHeuristic(path)
 	assert.Equal(t, unknownVersion, scheme)
-	assert.Equal(t, "0", signerCount)
+	assert.Equal(t, "unknown", signerCount)
 }
 
 func TestConvertApkSignerFindings(t *testing.T) {
@@ -273,4 +273,34 @@ func TestSigningIdentity_MockBinary(t *testing.T) {
 	fp, scheme := SigningIdentity(target)
 	assert.Equal(t, "0011223344aabbcc", fp)
 	assert.Equal(t, "v2", scheme)
+}
+
+func TestAndroidManifestInfo_NetworkOnlyWhenNSCExists(t *testing.T) {
+	dir := t.TempDir()
+	jadxDir := filepath.Join(dir, "jadx")
+	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
+
+	manifest := `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example">
+  <application android:networkSecurityConfig="@xml/custom_nsc" />
+</manifest>`
+	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "AndroidManifest.xml"), []byte(manifest), 0o600))
+
+	info := AndroidManifestInfo(dir)
+	assert.Empty(t, info.Network.Kind, "no NSC file means no network inventory claim")
+
+	nscDir := filepath.Join(jadxDir, "res", "xml")
+	require.NoError(t, os.MkdirAll(nscDir, 0o755))
+	nsc := `<network-security-config>
+  <base-config cleartextTrafficPermitted="true">
+    <trust-anchors><certificates src="system" /></trust-anchors>
+  </base-config>
+  <domain-config><pin-set><pin digest="SHA-256">abc=</pin></pin-set></domain-config>
+</network-security-config>`
+	require.NoError(t, os.WriteFile(filepath.Join(nscDir, "custom_nsc.xml"), []byte(nsc), 0o600))
+
+	info = AndroidManifestInfo(dir)
+	assert.Equal(t, "network_security_config", info.Network.Kind)
+	assert.True(t, info.Network.CleartextPermitted)
+	assert.True(t, info.Network.Pinned)
 }

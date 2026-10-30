@@ -2,9 +2,12 @@ package analyzers
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +21,8 @@ const (
 	apksignerName   = "apksigner"
 	apksignerBinary = "apksigner"
 	apksignerTo     = 2 * time.Minute
+	// apkSigBlockMagic ends the v2/v3 APK Signing Block.
+	apkSigBlockMagic = "APK Sig Block 42"
 )
 
 // ApkSigner verifies the APK signature and records the signing identity.
@@ -127,7 +132,7 @@ func ConvertApkSignerFindings(raw []byte, sessionID string) []models.Finding {
 			"The APK is signed with a debug keystore; it is not suitable for release and may indicate a repackaged build.",
 			out.SigningCertFP, models.SeverityHigh, models.SensitivityConfidential, 0.9)
 	}
-	if out.SignerCount == "0" {
+	if out.SignerCount == "0" && (out.SignatureScheme == valueNone || out.SignatureScheme == "") {
 		add("APK has no signer",
 			"No signing certificate was found; the APK cannot be verified as authentic.",
 			"signer_count=0", models.SeverityHigh, models.SensitivityConfidential, 0.8)
@@ -182,7 +187,7 @@ func parseApksignerOutput(out string) (scheme, certFP, signerCount, debug string
 	default:
 		// Unknown, not zero: reporting "0" would claim the APK has no
 		// signer when the output was merely unparsable.
-		signerCount = "unknown"
+		signerCount = unknownVersion
 	}
 	return scheme, certFP, signerCount, debug
 }
@@ -205,32 +210,78 @@ func parseCountAfterColon(line string) (int, bool) {
 	return n, true
 }
 
-// metaInfHeuristic inspects the APK's META-INF directory for signature files.
+// metaInfHeuristic inspects the APK's signature material without apksigner.
+// It checks the v1 META-INF block and the v2/v3 APK Signing Block, so a
+// modern v2/v3-only APK is not misreported as unsigned.
 func metaInfHeuristic(target string) (scheme, certFP, signerCount string) {
 	zr, err := openZip(target)
 	if err != nil {
-		return unknownVersion, "", "0"
+		return unknownVersion, "", "unknown"
 	}
 	defer zr.Close()
 
 	certs := 0
-	v1 := false
 	for _, f := range zr.File {
 		name := strings.ToUpper(f.Name)
 		if strings.HasPrefix(name, "META-INF/") {
 			if strings.HasSuffix(name, ".RSA") || strings.HasSuffix(name, ".DSA") || strings.HasSuffix(name, ".EC") {
-				v1 = true
 				certs++
 			}
 		}
 	}
-	if certs == 0 {
+
+	hasBlock := hasAPKSigningBlock(target)
+	switch {
+	case certs > 0 && hasBlock:
+		return "v1+v2/v3", "", fmt.Sprintf("%d", certs)
+	case certs > 0:
+		return "v1", "", fmt.Sprintf("%d", certs)
+	case hasBlock:
+		return "v2/v3", "", "unknown"
+	default:
 		return valueNone, "", "0"
 	}
-	if v1 {
-		return "v1", "", fmt.Sprintf("%d", certs)
+}
+
+// hasAPKSigningBlock reports whether the APK carries the v2/v3 APK Signing
+// Block. The block sits immediately before the ZIP central directory and ends
+// with the 16-byte "APK Sig Block 42" magic.
+func hasAPKSigningBlock(path string) bool {
+	f, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		return false
 	}
-	return unknownVersion, "", fmt.Sprintf("%d", certs)
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil || st.Size() < 32 {
+		return false
+	}
+	size := st.Size()
+
+	// The EOCD record lives in the last 64 KiB + 22 bytes.
+	tailLen := int64(64*1024 + 22)
+	if tailLen > size {
+		tailLen = size
+	}
+	tail := make([]byte, tailLen)
+	if _, err := f.ReadAt(tail, size-tailLen); err != nil {
+		return false
+	}
+	idx := bytes.LastIndex(tail, []byte("PK\x05\x06"))
+	if idx < 0 || idx+22 > len(tail) {
+		return false
+	}
+	cdOffset := int64(binary.LittleEndian.Uint32(tail[idx+16:]))
+	if cdOffset < 24 || cdOffset > size {
+		return false
+	}
+
+	footer := make([]byte, 24)
+	if _, err := f.ReadAt(footer, cdOffset-24); err != nil {
+		return false
+	}
+	return string(footer[8:24]) == apkSigBlockMagic
 }
 
 func atoiSafe(s string) int {
@@ -273,9 +324,20 @@ func AndroidManifestInfo(workdir string) models.AppInventory {
 	}
 	info.BundleID = m.Package
 	info.Permissions = m.permissions()
-	info.Network = models.NetworkPolicy{Kind: "network_security_config"}
 	if strings.EqualFold(m.Application.Debuggable, "true") {
 		info.Debuggable = true
+	}
+
+	// Only claim a network security config when the manifest actually
+	// references one (or the conventional file exists next to it).
+	root := filepath.Dir(manifestPath)
+	if nscAbs, _ := resolveNSCPath(root, m); nscAbs != "" {
+		info.Network = models.NetworkPolicy{Kind: "network_security_config"}
+		if nsc, err := readFileCapped(nscAbs, maxManifestBytes); err == nil {
+			content := string(nsc)
+			info.Network.CleartextPermitted = strings.Contains(content, `cleartextTrafficPermitted="true"`)
+			info.Network.Pinned = strings.Contains(content, "<pin-set")
+		}
 	}
 
 	// apktool.yml carries versionInfo/sdkInfo that the manifest does not.

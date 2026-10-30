@@ -3,6 +3,7 @@ package analyzers
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dedek0/mobiscope/internal/models"
@@ -189,15 +190,81 @@ func TestInventory_ScanPatterns_PinningIndicators(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "Pinning.java"), []byte(java), 0o600))
 
 	inv := NewInventory()
-	findings, _ := inv.scanPatterns(jadxDir, "s")
+	findings, agg := inv.scanPatterns(jadxDir, "s")
 
-	pinningCount := 0
+	pinning := 0
 	for _, f := range findings {
 		if f.Category == "pinning_indicator" {
-			pinningCount++
+			pinning++
+			assert.Equal(t, models.PlatformAndroid, f.Platform)
 		}
 	}
-	assert.GreaterOrEqual(t, pinningCount, 2)
+	assert.Equal(t, 1, pinning, "pinning is app-level, not one finding per occurrence")
+	assert.Equal(t, 2, agg.PinningCount)
+	assert.ElementsMatch(t, []string{"CertificatePinner", "sha256/"}, agg.Pinning)
+}
+
+func TestInventory_ScanPatterns_AggregatesIPsAndEmails(t *testing.T) {
+	dir := t.TempDir()
+	jadxDir := filepath.Join(dir, "jadx")
+	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
+
+	src := `String a = "10.0.0.1";
+String b = "10.0.0.1";
+String c = "hello@example.com";
+`
+	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "Net.java"), []byte(src), 0o600))
+
+	inv := NewInventory()
+	findings, agg := inv.scanPatterns(jadxDir, "s")
+
+	assert.Empty(t, findings, "IPs and e-mails must not become findings")
+	assert.Equal(t, 2, agg.IPCount)
+	assert.Equal(t, []string{"10.0.0.1"}, agg.IPs)
+	assert.Equal(t, 1, agg.EmailCount)
+	assert.Equal(t, []string{"hello@example.com"}, agg.Emails)
+}
+
+func TestInventory_ScanPatterns_PrivateKeyNeedsFullBlock(t *testing.T) {
+	dir := t.TempDir()
+	jadxDir := filepath.Join(dir, "jadx")
+	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
+
+	// Header-only constants (the JSch/Netty shape) must not be reported.
+	headerOnly := `private static final String HEADER = "-----BEGIN RSA PRIVATE KEY-----";`
+	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "Parser.java"), []byte(headerOnly), 0o600))
+
+	inv := NewInventory()
+	findings, _ := inv.scanPatterns(jadxDir, "s")
+	assert.Empty(t, findings, "a PEM header alone is not a key")
+
+	// A complete PEM block is a real finding, with the body redacted.
+	body := strings.Repeat("A", 128)
+	block := "-----BEGIN RSA PRIVATE KEY-----\n" + body + "\n-----END RSA PRIVATE KEY-----"
+	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "Key.java"), []byte(block), 0o600))
+
+	findings, _ = inv.scanPatterns(jadxDir, "s")
+	require.Len(t, findings, 1)
+	assert.Equal(t, "Private Key Block", findings[0].Title)
+	assert.NotContains(t, findings[0].Evidence, body)
+	assert.Contains(t, findings[0].Evidence, "redacted")
+}
+
+func TestInventory_ScanPatterns_ClientSideKeysAreInfo(t *testing.T) {
+	dir := t.TempDir()
+	jadxDir := filepath.Join(dir, "jadx")
+	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
+
+	src := `String key = "AIzaSyBNHY-s4PoQgv76wzw5inRb-AttzSvJfCo";`
+	require.NoError(t, os.WriteFile(filepath.Join(jadxDir, "Config.java"), []byte(src), 0o600))
+
+	inv := NewInventory()
+	findings, _ := inv.scanPatterns(jadxDir, "s")
+
+	require.Len(t, findings, 1)
+	assert.Equal(t, "GCP API Key", findings[0].Title)
+	assert.Equal(t, models.SeverityInfo, findings[0].Severity)
+	assert.Equal(t, models.SensitivityPublic, findings[0].Sensitivity)
 }
 
 func TestInventory_ScanPatterns_SkipsNonRelevantFiles(t *testing.T) {
@@ -233,9 +300,9 @@ String c = "http://insecure.example.org/";
 	inv := NewInventory()
 	findings, agg := inv.scanPatterns(jadxDir, "s")
 
-	assert.Equal(t, 3, agg.Count, "every URL occurrence is counted")
-	require.Len(t, agg.URLs, 2, "unique sample is deduplicated")
-	assert.Equal(t, []string{"http://insecure.example.org/", "https://api.example.com/v1"}, agg.URLs)
+	assert.Equal(t, 3, agg.URLs.Count, "every URL occurrence is counted")
+	require.Len(t, agg.URLs.URLs, 2, "unique sample is deduplicated")
+	assert.Equal(t, []string{"http://insecure.example.org/", "https://api.example.com/v1"}, agg.URLs.URLs)
 
 	// Generic URLs must never surface as findings (demoted to aggregate).
 	for _, f := range findings {
@@ -324,11 +391,4 @@ func TestSourceRoot(t *testing.T) {
 	jadxDir := filepath.Join(dir, "jadx")
 	require.NoError(t, os.MkdirAll(jadxDir, 0o755))
 	assert.Equal(t, jadxDir, SourceRoot(dir))
-}
-
-func TestCountLines(t *testing.T) {
-	assert.Equal(t, 1, countLines(""))
-	assert.Equal(t, 1, countLines("hello"))
-	assert.Equal(t, 2, countLines("hello\nworld"))
-	assert.Equal(t, 3, countLines("a\nb\nc"))
 }

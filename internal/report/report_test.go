@@ -187,6 +187,32 @@ func TestShortID_ShortDoesNotPanic(t *testing.T) {
 	assert.Equal(t, "12345678", shortID("1234567890abcdef"))
 }
 
+func TestMarkdownReporter_OnlyRepresentatives(t *testing.T) {
+	session := &models.AnalysisSession{
+		ID:     "s",
+		Status: models.StatusCompleted,
+		Findings: []models.Finding{
+			{
+				ID: "rep1", Title: "Representative", Category: models.CategoryCodePattern,
+				Severity: models.SeverityHigh, ClusterID: "cl-1", Representative: true,
+				Location: models.Location{File: "A.java", Line: 1},
+			},
+			{
+				ID: "mem1", Title: "Cluster member", Category: models.CategoryCodePattern,
+				Severity: models.SeverityHigh, ClusterID: "cl-1", Representative: false,
+				Location: models.Location{File: "B.java", Line: 2},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, (&MarkdownReporter{}).Render(session, &buf))
+	out := buf.String()
+
+	assert.Contains(t, out, "Representative")
+	assert.NotContains(t, out, "Cluster member")
+	assert.Contains(t, out, "and 1 more occurrence(s)")
+}
+
 func TestBuildMDData_UnknownSeverityGroup(t *testing.T) {
 	session := &models.AnalysisSession{
 		ID:     "s",

@@ -195,6 +195,16 @@ type AppInventory struct {
 	// scanned sources; URLs is a bounded unique sample (Android only).
 	URLCount int      `json:"url_count,omitempty"`
 	URLs     []string `json:"urls,omitempty"`
+	// IPCount/EmailCount are aggregate counters for low-signal observations
+	// that are not findings; IPs/Emails are bounded unique samples.
+	IPCount    int      `json:"ip_count,omitempty"`
+	IPs        []string `json:"ips,omitempty"`
+	EmailCount int      `json:"email_count,omitempty"`
+	Emails     []string `json:"emails,omitempty"`
+	// PinningIndicators lists the pinning APIs/materials referenced by the
+	// app and PinningCount is the total number of occurrences.
+	PinningIndicators []string `json:"pinning_indicators,omitempty"`
+	PinningCount      int      `json:"pinning_count,omitempty"`
 	// SDKs lists the third-party libraries detected in the app.
 	SDKs []SDK `json:"sdks,omitempty"`
 	// Vulnerabilities lists the known vulnerabilities found for the

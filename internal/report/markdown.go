@@ -89,8 +89,24 @@ func buildMDData(session *models.AnalysisSession) mdData {
 		}
 	}
 
+	// The findings list can carry thousands of members of the same cluster.
+	// The human report shows the cluster representative plus the occurrence
+	// count; findings.json/SARIF keep every occurrence. Synthetic sessions
+	// that never went through Cluster have no representative flag, so they
+	// are rendered in full.
+	hasRepresentative := false
+	for _, f := range session.Findings {
+		if f.Representative {
+			hasRepresentative = true
+			break
+		}
+	}
+
 	bySev := make(map[string][]mdFindingRow)
 	for _, f := range session.Findings {
+		if hasRepresentative && !f.Representative {
+			continue
+		}
 		extra := 0
 		if f.ClusterID != "" {
 			extra = clusterCounts[f.ClusterID] - 1

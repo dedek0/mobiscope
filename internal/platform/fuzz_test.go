@@ -86,7 +86,7 @@ func hugeDeclaredZip(name string) []byte {
 }
 
 // FuzzDetect hammers platform.Detect with arbitrary bytes. Seeds cover the
-// fixture classes from PENDING.md §3: non-ZIP data, truncated ZIPs, hostile
+// fixture classes: non-ZIP data, truncated ZIPs, hostile
 // entry names, deep nesting and huge declared sizes without payload. The
 // seed corpus also runs as a plain unit test via `go test`.
 func FuzzDetect(f *testing.F) {

@@ -20,7 +20,7 @@ func buildCodesignRaw(t *testing.T, entitlements map[string]interface{}) []byte 
 }
 
 // TestConvertCodeSignFindings_Severities pins the severity, category,
-// platform and session wiring for every entitlement rule (PENDING §1.7).
+// platform and session wiring for every entitlement rule.
 func TestConvertCodeSignFindings_Severities(t *testing.T) {
 	tests := []struct {
 		name        string

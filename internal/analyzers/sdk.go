@@ -19,12 +19,10 @@ const sdkName = "sdk"
 // SDK detects the third-party libraries bundled in the app. The detection
 // runs over the DEX class names, so it works on an undecoded APK, and the
 // version is recovered from the decoded resources when the decompiler ran.
-type SDK struct {
-	runner CommandRunner
-}
+type SDK struct{}
 
 func NewSDK() *SDK {
-	return &SDK{runner: &DefaultCommandRunner{}}
+	return &SDK{}
 }
 
 func (s *SDK) Name() string { return sdkName }

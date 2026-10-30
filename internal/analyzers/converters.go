@@ -7,7 +7,7 @@ import (
 )
 
 // ConvertFindings lets the pipeline assert a FindingConverter on any analyzer
-// instead of growing a switch over analyzer names (PENDING §1.6/§5).
+// instead of growing a switch over analyzer names.
 // Each method delegates to the analyzer's package-level converter.
 
 func (a *Gitleaks) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
@@ -52,4 +52,12 @@ func (a *ELF) ConvertFindings(raw json.RawMessage, sessionID string) []models.Fi
 
 func (a *AntiAnalysis) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
 	return ConvertAntiAnalysisFindings(raw, sessionID)
+}
+
+func (a *Repack) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
+	return ConvertRepackFindings(raw, sessionID)
+}
+
+func (a *SDK) ConvertFindings(raw json.RawMessage, sessionID string) []models.Finding {
+	return ConvertSDKFindings(raw, sessionID)
 }
