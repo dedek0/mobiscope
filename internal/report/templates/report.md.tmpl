@@ -22,6 +22,42 @@
 - **LLM triage:** {{.Triaged}} finding(s) triaged · cost ${{printf "%.6f" .CostUSD}}
 {{- end}}
 
+{{- if .Surface}}
+
+## Attack surface
+
+| Fact | Value |
+|------|-------|
+{{- if .Surface.Package}}
+| Package | `{{.Surface.Package}}` |
+{{- end}}
+{{- if .Surface.Version}}
+| Version | {{.Surface.Version}} |
+{{- end}}
+{{- if .Surface.TargetSDK}}
+| Target SDK | {{.Surface.TargetSDK}} |
+{{- end}}
+{{- if .Surface.MinOS}}
+| Min OS | {{.Surface.MinOS}} |
+{{- end}}
+{{- if .Surface.Signing}}
+| Signing | {{.Surface.Signing}} |
+{{- end}}
+{{- if .Surface.Network}}
+| Network | {{.Surface.Network}} |
+{{- end}}
+{{- if .Surface.NativeLibs}}
+| Native libraries | {{.Surface.NativeLibs}}{{if .Surface.ABIs}} ({{range $i, $a := .Surface.ABIs}}{{if $i}}, {{end}}{{$a}}{{end}}){{end}} |
+{{- end}}
+{{- if .Surface.Permissions}}
+| Permissions | {{range $i, $p := .Surface.Permissions}}{{if $i}}, {{end}}`{{$p}}`{{end}} |
+{{- end}}
+{{- if .Surface.SDKs}}
+| SDKs | {{range $i, $s := .Surface.SDKs}}{{if $i}}, {{end}}{{$s}}{{end}} |
+{{- end}}
+
+{{- end}}
+
 ## Findings by severity
 
 | Severity | Count |

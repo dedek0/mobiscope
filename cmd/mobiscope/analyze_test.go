@@ -119,14 +119,15 @@ func TestValidateStages(t *testing.T) {
 
 func TestBuildAnalyzers_AndroidDefaults(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, androidTarget())
-	// The default set runs the decompilers, the implicit signature check and
-	// the in-process analyzers. The scanners are opt-in.
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+	// The default runs jadx, the implicit signature check and the in-process
+	// analyzers. The scanners are opt-in and apktool is no longer run by
+	// default (the native inventory reader covers manifest/resources/NSC).
+	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_NilTargetDefaultsToAndroid(t *testing.T) {
 	list := buildAnalyzers(stageOptions{}, nil)
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_AndroidStageFilter(t *testing.T) {
@@ -149,7 +150,7 @@ func TestBuildAnalyzers_QuickKeepsDefaultStages(t *testing.T) {
 	// The scanners are already opt-in, so --quick does not change the
 	// default set.
 	list := buildAnalyzers(stageOptions{quick: true}, androidTarget())
-	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_NoSecretsSkipsOnlyGitleaks(t *testing.T) {
@@ -158,11 +159,14 @@ func TestBuildAnalyzers_NoSecretsSkipsOnlyGitleaks(t *testing.T) {
 }
 
 func TestBuildAnalyzers_DecompilerSelection(t *testing.T) {
-	list := buildAnalyzers(stageOptions{decompiler: "jadx"}, androidTarget())
+	list := buildAnalyzers(stageOptions{decompiler: "jadx", decompilerSet: true}, androidTarget())
 	assert.Equal(t, []string{"jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 
-	list = buildAnalyzers(stageOptions{decompiler: "apktool"}, androidTarget())
+	list = buildAnalyzers(stageOptions{decompiler: "apktool", decompilerSet: true}, androidTarget())
 	assert.Equal(t, []string{"apktool", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
+
+	list = buildAnalyzers(stageOptions{decompiler: "both", decompilerSet: true}, androidTarget())
+	assert.Equal(t, []string{"apktool", "jadx", "apksigner", "elf", "anti_analysis", "repack", "sdk"}, analyzerNames(list))
 }
 
 func TestBuildAnalyzers_IOSDefaults(t *testing.T) {
@@ -206,7 +210,7 @@ func TestBuildAnalyzers_NoResPropagation(t *testing.T) {
 			writeArgsStub(t, stubDir, "apktool", logPath)
 			withStubPATH(t, stubDir)
 
-			list := buildAnalyzers(stageOptions{noRes: tt.noRes, decompiler: "both"}, androidTarget())
+			list := buildAnalyzers(stageOptions{noRes: tt.noRes, decompiler: "both", decompilerSet: true}, androidTarget())
 			require.Len(t, list, 7)
 			workdir := t.TempDir()
 			for _, a := range list {
@@ -553,4 +557,32 @@ func TestAnalyze_SHA256GateHashContract(t *testing.T) {
 	assert.Equal(t, strings.ToLower(got), got, "hash is lowercase hex")
 	assert.True(t, strings.EqualFold(got, strings.ToUpper(got)), "gate compares case-insensitively")
 	assert.False(t, strings.EqualFold(got, strings.Repeat("0", 64)))
+}
+
+func TestBuildAnalyzers_ReuseSkipsCachedDecompilers(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "jadx"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "jadx", "AndroidManifest.xml"), []byte("<manifest/>"), 0o600))
+
+	list := buildAnalyzers(stageOptions{
+		decompiler:    "both",
+		decompilerSet: true,
+		reuse:         true,
+		sessionDir:    dir,
+	}, androidTarget())
+	names := analyzerNames(list)
+	assert.NotContains(t, names, "jadx")
+	assert.Contains(t, names, "apktool")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "apktool"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "apktool", "AndroidManifest.xml"), []byte("<manifest/>"), 0o600))
+	list = buildAnalyzers(stageOptions{
+		decompiler:    "both",
+		decompilerSet: true,
+		reuse:         true,
+		sessionDir:    dir,
+	}, androidTarget())
+	names = analyzerNames(list)
+	assert.NotContains(t, names, "jadx")
+	assert.NotContains(t, names, "apktool")
 }

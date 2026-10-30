@@ -64,9 +64,12 @@ before exposing the API.
 ## Usage
 
 ```bash
-# Android
+# Android (default: jadx + in-process stages)
 ./bin/mobiscope analyze app.apk
 ./bin/mobiscope analyze app.apk --stages apktool,jadx,elf,anti-analysis,repack,sdk,gitleaks,semgrep
+
+# Reuse the decompiled tree already stored for this APK's SHA-256
+./bin/mobiscope analyze app.apk --reuse
 
 # Batch: several targets in one run (per-target session dirs + summary table)
 ./bin/mobiscope analyze a.apk b.ipa c.apk

@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or to a bundled third-party library.
 - `--stages` validation: an unknown stage now fails with the list of valid
   names instead of silently running nothing.
+- Android default now runs `jadx` only; `apktool` is opt-in via `--stages` or
+  `--decompiler both`. `--reuse` skips a decompiler whose SHA-keyed session
+  tree already exists.
+- `report.md` gains an attack-surface section (package/version/targetSdk,
+  permissions, SDKs, native ABIs, network policy, signing).
+- LLM triage skips `info` findings, which are inventory/surface facts.
 - CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
   findings; `--baseline <findings.json|session.json>` suppresses known ones
   before triage.

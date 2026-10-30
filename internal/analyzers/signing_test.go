@@ -58,14 +58,14 @@ func lpWithAlg(id uint32, value []byte) []byte {
 
 // buildV2Value assembles the value of a v2 ID-value pair for one signer.
 func buildV2Value(certDER, publicKeyDER, digest, signature []byte) []byte {
-	digests := lp(lpWithAlg(0x0102, digest))
+	digests := lp(lp(lpWithAlg(0x0103, digest)))
 	certs := lp(lp(certDER))
 	signedData := append(append(digests, certs...), lp(nil)...)
 
-	signatures := lp(lpWithAlg(0x0102, signature))
+	signatures := lp(lp(lpWithAlg(0x0103, signature)))
 	signer := append(lp(signedData), signatures...)
 	signer = append(signer, lp(publicKeyDER)...)
-	return lp(signer)
+	return lp(lp(signer))
 }
 
 // buildSigningBlock wraps a v2 value in the APK Signing Block framing.
@@ -90,7 +90,7 @@ func testContentDigest(prefix, centralDir, eocd []byte, blockOffset int) []byte 
 	chunks := uint32(0)
 	add := func(chunk []byte) {
 		h := sha256.New()
-		h.Write([]byte{0x5a})
+		h.Write([]byte{0xa5})
 		var b [4]byte
 		binary.LittleEndian.PutUint32(b[:], uint32(len(chunk)))
 		h.Write(b[:])
@@ -180,7 +180,9 @@ func signedDataFromValue(t *testing.T, value []byte) []byte {
 	t.Helper()
 	signers, _, ok := readLengthPrefixed(value)
 	require.True(t, ok)
-	signedData, _, ok := readLengthPrefixed(signers)
+	signer, _, ok := readLengthPrefixed(signers)
+	require.True(t, ok)
+	signedData, _, ok := readLengthPrefixed(signer)
 	require.True(t, ok)
 	return signedData
 }
@@ -202,7 +204,7 @@ func v2SignerValue(certDER []byte) []byte {
 	signer = append(signer, lp(signedData)...)
 	signer = append(signer, lp([]byte{0x00})...) // signatures
 	signer = append(signer, lp([]byte{0x00})...) // public key
-	return lp(signer)
+	return lp(lp(signer))
 }
 
 // writeSignedAPK writes a ZIP with a v2 APK Signing Block inserted before the

@@ -48,6 +48,7 @@ func newAnalyzeCmd() *cobra.Command {
 		baseline       string
 		mapping        string
 		allowlist      string
+		reuse          bool
 	)
 
 	cmd := &cobra.Command{
@@ -122,6 +123,7 @@ func newAnalyzeCmd() *cobra.Command {
 					baseline:       baseline,
 					mapping:        mapping,
 					allowlist:      allowlist,
+					reuse:          reuse,
 					logger:         logger,
 					ctx:            ctx,
 				})
@@ -175,7 +177,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quick, "quick", false, "Skip the optional scanners (gitleaks, semgrep) for a faster pass")
 	cmd.Flags().BoolVar(&noSecrets, "no-secrets", false, "Skip the gitleaks secret scanner")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "Path to a custom semgrep rule pack (default: the embedded MASTG pack)")
-	cmd.Flags().StringVar(&decompiler, "decompiler", "both", "Decompiler to run: apktool, jadx or both")
+	cmd.Flags().StringVar(&decompiler, "decompiler", "jadx", "Decompiler to run: apktool, jadx or both")
 	cmd.Flags().StringVar(&expectCert, "expect-cert", "", "Expected signing certificate fingerprint (hex); a mismatch is reported as a repackaging signal")
 	cmd.Flags().BoolVar(&osvLookup, "osv", false, "Look the detected libraries up in the OSV vulnerability database (reaches the network)")
 	cmd.Flags().BoolVar(&writeSBOM, "sbom", false, "Write a CycloneDX software bill of materials next to the report")
@@ -183,6 +185,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&baseline, "baseline", "", "Suppress findings that match a previous findings.json or session.json")
 	cmd.Flags().StringVar(&mapping, "mapping", "", "R8/ProGuard mapping.txt used to deobfuscate finding locations")
 	cmd.Flags().StringVar(&allowlist, "allowlist", "", "YAML allowlist of documented findings to suppress")
+	cmd.Flags().BoolVar(&reuse, "reuse", false, "Reuse an existing decompiled tree in the session directory")
 
 	return cmd
 }
@@ -212,6 +215,7 @@ type targetFlags struct {
 	baseline       string
 	mapping        string
 	allowlist      string
+	reuse          bool
 	logger         *slog.Logger
 	ctx            context.Context
 }
@@ -256,14 +260,27 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 	targetOpts := *opts
 	targetOpts.Platform = target.Platform
 
+	reuseDir := ""
+	if tf.reuse {
+		sum, err := utils.Sha256File(apkPath)
+		if err != nil {
+			return nil, fmt.Errorf("hashing target for reuse: %w", err)
+		}
+		reuseDir = filepath.Join(workdir, sum[:16])
+		tf.logger.Info("reuse enabled", "session", sum[:16])
+	}
+
 	analyzersList := buildAnalyzers(stageOptions{
-		stages:     stageFilter,
-		noRes:      tf.noRes,
-		quick:      tf.quick,
-		noSecrets:  tf.noSecrets,
-		rules:      tf.rulesPath,
-		decompiler: tf.decompiler,
-		expectCert: tf.expectCert,
+		stages:        stageFilter,
+		noRes:         tf.noRes,
+		quick:         tf.quick,
+		noSecrets:     tf.noSecrets,
+		rules:         tf.rulesPath,
+		decompiler:    tf.decompiler,
+		decompilerSet: c.Flags().Changed("decompiler"),
+		reuse:         tf.reuse,
+		sessionDir:    reuseDir,
+		expectCert:    tf.expectCert,
 	}, target)
 	p := pipeline.NewWithOptions(analyzersList, tf.logger, targetOpts)
 
@@ -469,6 +486,11 @@ type stageOptions struct {
 	rules string
 	// decompiler selects which decompiler(s) run: apktool, jadx or both.
 	decompiler string
+	// decompilerSet records whether --decompiler was passed explicitly.
+	decompilerSet bool
+	// reuse skips a decompiler whose output already exists in sessionDir.
+	reuse      bool
+	sessionDir string
 	// expectCert is the signing certificate fingerprint the artifact is
 	// expected to carry.
 	expectCert string
@@ -551,6 +573,22 @@ func (o stageOptions) stageEnabled(name string) bool {
 	return len(o.stages) == 0 || named
 }
 
+// cachedTree reports whether a previous decompiler run left a usable tree.
+func cachedTree(sessionDir, name string) bool {
+	_, err := os.Stat(filepath.Join(sessionDir, name, "AndroidManifest.xml"))
+	return err == nil
+}
+
+// stageNamed reports whether an explicit --stages list names a stage.
+func stageNamed(stages []string, name string) bool {
+	for _, s := range stages {
+		if stageKey(s) == stageKey(name) {
+			return true
+		}
+	}
+	return false
+}
+
 // stageKey makes `--stages` tolerant to the hyphen/underscore difference
 // between the CLI spelling (`anti-analysis`) and the analyzer identifier
 // (`anti_analysis`).
@@ -602,19 +640,42 @@ func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Anal
 		return list
 	}
 
-	// Android (default).
-	switch opts.decompiler {
-	case "apktool":
+	// Android decompilers. The default is jadx only: the native inventory
+	// reader already covers manifest/resources/NSC, so running apktool as
+	// well costs another full decode without adding core facts. An explicit
+	// --stages apktool still selects apktool, and --decompiler both restores
+	// the old behavior.
+	apktoolSelected := stageNamed(opts.stages, "apktool")
+	jadxSelected := stageNamed(opts.stages, "jadx")
+	addAPKTool := func() {
+		if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "apktool") {
+			return
+		}
 		list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
-	case "jadx":
+	}
+	addJADX := func() {
+		if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "jadx") {
+			return
+		}
 		list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
-	default:
-		if opts.stageEnabled("apktool") {
-			list = append(list, analyzers.NewAPKTool(analyzers.APKToolConfig{NoRes: opts.noRes}))
-		}
-		if opts.stageEnabled("jadx") {
-			list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
-		}
+	}
+	switch {
+	case opts.decompilerSet && opts.decompiler == "apktool":
+		addAPKTool()
+	case opts.decompilerSet && opts.decompiler == "jadx":
+		addJADX()
+	case opts.decompilerSet:
+		addAPKTool()
+		addJADX()
+	case apktoolSelected && jadxSelected:
+		addAPKTool()
+		addJADX()
+	case apktoolSelected:
+		addAPKTool()
+	case jadxSelected:
+		addJADX()
+	case len(opts.stages) == 0:
+		addJADX()
 	}
 	if opts.stageEnabled("apksigner") {
 		list = append(list, analyzers.NewApkSigner())

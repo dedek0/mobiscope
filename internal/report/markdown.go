@@ -31,6 +31,22 @@ type mdData struct {
 	Triaged       int
 	CostUSD       float64
 	LLMRun        bool
+
+	// Attack surface.
+	Surface *mdSurface
+}
+
+type mdSurface struct {
+	Package     string
+	Version     string
+	TargetSDK   string
+	MinOS       string
+	Permissions []string
+	SDKs        []string
+	NativeLibs  int
+	ABIs        []string
+	Network     string
+	Signing     string
 }
 
 type mdClusterRow struct {
@@ -216,7 +232,86 @@ func buildMDData(session *models.AnalysisSession) mdData {
 		Triaged:       triaged,
 		CostUSD:       session.LLMCostUSD,
 		LLMRun:        triaged > 0 || session.LLMCostUSD > 0,
+		Surface:       buildSurface(session),
 	}
+}
+
+// buildSurface turns the neutral AppInventory facts into a bounded attack
+// surface block for the human report.
+func buildSurface(session *models.AnalysisSession) *mdSurface {
+	app := session.App
+	if app.BundleID == "" && len(app.Permissions) == 0 && len(app.SDKs) == 0 &&
+		len(app.NativeLibs) == 0 && app.Network.Kind == "" && session.SignatureScheme == "" {
+		return nil
+	}
+
+	surface := &mdSurface{
+		Package:    app.BundleID,
+		Version:    app.VersionName,
+		TargetSDK:  app.TargetSDK,
+		MinOS:      app.MinOS,
+		NativeLibs: len(app.NativeLibs),
+	}
+	if surface.Package == "" {
+		surface.Package = session.PackageName
+	}
+	if surface.Version == "" {
+		surface.Version = session.VersionName
+	}
+
+	const maxList = 20
+	for _, p := range app.Permissions {
+		if len(surface.Permissions) >= maxList {
+			break
+		}
+		surface.Permissions = append(surface.Permissions, p)
+	}
+	for _, sdk := range app.SDKs {
+		if len(surface.SDKs) >= maxList {
+			break
+		}
+		label := sdk.Name
+		if sdk.Version != "" {
+			label += " " + sdk.Version
+		}
+		surface.SDKs = append(surface.SDKs, label)
+	}
+
+	abiSeen := map[string]bool{}
+	for _, lib := range app.NativeLibs {
+		for _, arch := range lib.Archs {
+			if arch != "" && !abiSeen[arch] {
+				abiSeen[arch] = true
+				surface.ABIs = append(surface.ABIs, arch)
+			}
+		}
+	}
+	sort.Strings(surface.ABIs)
+
+	if app.Network.Kind != "" {
+		network := app.Network.Kind
+		if app.Network.CleartextPermitted {
+			network += ", cleartext allowed"
+		}
+		if app.Network.Pinned {
+			network += ", pinned"
+		}
+		if n := len(app.Network.Exceptions); n > 0 {
+			network += fmt.Sprintf(", %d exception(s)", n)
+		}
+		surface.Network = network
+	}
+	if session.SignatureScheme != "" {
+		signing := session.SignatureScheme
+		if fp := session.SigningCertFP; fp != "" {
+			if len(fp) > 16 {
+				fp = fp[:16]
+			}
+			signing += " (" + fp + ")"
+		}
+		surface.Signing = signing
+	}
+	return surface
 }
 
 // shortID returns at most 8 characters of id without panicking on short ids.

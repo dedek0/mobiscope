@@ -200,16 +200,20 @@ decoded tree when the native parse fails. See
 
 ## P3 — performance and reporting
 
-- Stop running both decompilers in full by default. If `jadx` runs, `apktool`
-  can run with `-s` (resources only), or be replaced by the native AXML/arsc
-  parser.
-- Cache decompiler output by APK SHA and offer `--reuse`.
-- `scanPatterns`: prefilter with `strings.Contains`/Aho-Corasick, skip vendor
-  directories and parallelize the walk.
-- Report: representatives plus counts, a surface section (permissions,
-  components, deep links, SDKs, native libs, signing) and top N per category.
-- Triage: only send representatives with severity ≥ `low`; today 1,597
-  findings become LLM cost.
+- Stop running both decompilers in full by default. (done) The default is
+  now `jadx` only; the native AXML/arsc parser covers manifest/resources/NSC,
+  and `apktool` runs only when named or with `--decompiler`.
+- Cache decompiler output by APK SHA and offer `--reuse`. (done) The session
+  directory is already SHA-keyed; `--reuse` skips a decompiler whose tree
+  exists.
+- `scanPatterns`: (partial) rules carry a cheap `Needle` prefilter before the
+  regex engine; vendor-directory skipping and a parallel walk are still open.
+- Report: (done) representatives plus counts, top clusters/categories and an
+  attack-surface section (package/version/targetSdk, permissions, SDKs, native
+  ABIs, network policy, signing). Deep-link/component lists are still derived
+  from findings rather than a dedicated surface table.
+- Triage: (done) only representatives with severity ≥ `low` are sent; info
+  findings are inventory/surface facts and skip the LLM.
 - Golden fixtures with the false-positive traps (PEM in parser code, Firebase
   keys, multidex, zipalign timestamps) to lock the behavior.
 - Obfuscation depth: scoring string encryption beyond Base64 detection,

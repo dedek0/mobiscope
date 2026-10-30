@@ -119,6 +119,12 @@ func (te *TriageEngine) Triage(ctx context.Context, findings []models.Finding, c
 		if !findings[i].NeedsLLMTriage {
 			continue
 		}
+		// Info-level findings are inventory/surface facts (pinning markers,
+		// library detection, client-side identifiers). Sending them to the
+		// LLM adds cost without a security decision.
+		if findings[i].Severity == models.SeverityInfo {
+			continue
+		}
 
 		if err := ctx.Err(); err != nil {
 			return processed, fmt.Errorf("triage cancelled: %w", err)

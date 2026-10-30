@@ -200,16 +200,20 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
 
 ## P3 — performance e relatório
 
-- Parar de rodar os dois decompiladores completos por padrão. Se o `jadx` roda,
-  o `apktool` pode ir com `-s` (só resources) ou ser substituído pelo parser
-  nativo de AXML/arsc.
-- Cachear saída de decompilador por SHA do APK e oferecer `--reuse`.
-- `scanPatterns`: prefilter com `strings.Contains`/Aho-Corasick, pular
-  diretórios de vendor e paralelizar o walk.
-- Relatório: representantes + contagens, seção de superfície (permissões,
-  componentes, deeplinks, SDKs, nativas, assinatura) e top N por categoria.
-- Triage: enviar só representantes com severidade ≥ `low`; hoje 1.597 findings
-  viram custo de LLM.
+- Parar de rodar os dois decompiladores completos por padrão. (feito) O padrão
+  agora é só `jadx`; o parser nativo de AXML/arsc cobre manifest/resources/NSC,
+  e o `apktool` só roda quando nomeado ou com `--decompiler`.
+- Cachear saída de decompilador por SHA do APK e oferecer `--reuse`. (feito)
+  A sessão já é keyed pelo SHA; `--reuse` pula o decompilador cuja árvore
+  existe.
+- `scanPatterns`: (parcial) as regras têm um prefilter `Needle` barato antes
+  do regex; pular diretórios de vendor e paralelizar o walk continua aberto.
+- Relatório: (feito) representantes + contagens, top clusters/categorias e uma
+  seção de superfície (pacote/versão/targetSdk, permissões, SDKs, ABIs
+  nativas, política de rede, assinatura). Listas de componentes/deeplinks
+  ainda vêm dos findings, não de uma tabela de superfície dedicada.
+- Triage: (feito) só representantes com severidade ≥ `low` são enviados;
+  findings info são fatos de inventário/superfície e não gastam LLM.
 - Fixtures golden com os traps de falso positivo (PEM em código de parser,
   chaves Firebase, multidex, timestamp de zipalign) para travar o
   comportamento.

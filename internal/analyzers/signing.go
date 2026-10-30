@@ -154,8 +154,6 @@ type schemeSigner struct {
 	signatures []byte
 	publicKey  []byte
 	certs      [][]byte
-	minSDK     uint32
-	maxSDK     uint32
 }
 
 // applyCertificate fills the certificate facts used by the findings.
@@ -301,7 +299,10 @@ func lastIndex(haystack, needle []byte) int {
 	return -1
 }
 
-// parseSchemeSignerList walks the signers of a v2/v3 block.
+// parseSchemeSignerList walks the signers of a v2/v3 block. The value is a
+// length-prefixed sequence of signers; each signer is itself length-prefixed,
+// and its content holds the signed data, signatures and public key. The v3
+// min/max SDK range lives inside the signed data, not in the signer.
 func parseSchemeSignerList(value []byte, v3 bool) []schemeSigner {
 	signers, _, ok := readLengthPrefixed(value)
 	if !ok {
@@ -311,26 +312,27 @@ func parseSchemeSignerList(value []byte, v3 bool) []schemeSigner {
 	out := []schemeSigner{}
 	buf := signers
 	for len(buf) > 0 {
-		signedData, rest, ok := readLengthPrefixed(buf)
+		signerContent, rest, ok := readLengthPrefixed(buf)
 		if !ok {
 			break
 		}
-		var minSDK, maxSDK uint32
+		signedData, fields, ok := readLengthPrefixed(signerContent)
+		if !ok {
+			break
+		}
 		if v3 {
-			// v3 puts the minSdkVersion/maxSdkVersion between the signed
-			// data and the signatures.
-			if len(rest) < 8 {
+			// v3 puts minSdkVersion/maxSdkVersion between the signed data
+			// and the signatures.
+			if len(fields) < 8 {
 				break
 			}
-			minSDK = binary.LittleEndian.Uint32(rest)
-			maxSDK = binary.LittleEndian.Uint32(rest[4:])
-			rest = rest[8:]
+			fields = fields[8:]
 		}
-		signatures, rest, ok := readLengthPrefixed(rest)
+		signatures, fields, ok := readLengthPrefixed(fields)
 		if !ok {
 			break
 		}
-		publicKey, rest, ok := readLengthPrefixed(rest)
+		publicKey, _, ok := readLengthPrefixed(fields)
 		if !ok {
 			break
 		}
@@ -339,8 +341,6 @@ func parseSchemeSignerList(value []byte, v3 bool) []schemeSigner {
 			signatures: signatures,
 			publicKey:  publicKey,
 			certs:      certificatesFromSignedData(signedData),
-			minSDK:     minSDK,
-			maxSDK:     maxSDK,
 		})
 		buf = rest
 	}
@@ -414,11 +414,11 @@ type signatureAlgorithm struct {
 // supportedSignatureAlgorithms lists the algorithms this verifier can check.
 var supportedSignatureAlgorithms = []signatureAlgorithm{
 	{0x0101, crypto.SHA256, algRSAPSS},
-	{0x0102, crypto.SHA256, algRSAPKCS1},
-	{0x0103, crypto.SHA256, algECDSA},
-	{0x0201, crypto.SHA512, algRSAPSS},
-	{0x0202, crypto.SHA512, algRSAPKCS1},
-	{0x0301, crypto.SHA512, algECDSA},
+	{0x0102, crypto.SHA512, algRSAPSS},
+	{0x0103, crypto.SHA256, algRSAPKCS1},
+	{0x0104, crypto.SHA512, algRSAPKCS1},
+	{0x0201, crypto.SHA256, algECDSA},
+	{0x0202, crypto.SHA512, algECDSA},
 }
 
 // verifySchemeSigners verifies every signer and returns the verification
@@ -496,18 +496,24 @@ func verifySchemeSigner(path string, block *apkSigningBlock, signer schemeSigner
 }
 
 // findSignature returns the first supported signature in a signatures
-// sequence.
+// sequence. Each signature is a length-prefixed record of signature algorithm
+// id followed by a length-prefixed signature.
 func findSignature(sequence []byte) (signatureAlgorithm, []byte, bool) {
 	buf := sequence
 	for len(buf) > 0 {
-		if len(buf) < 4 {
-			break
-		}
-		id := binary.LittleEndian.Uint32(buf)
-		buf = buf[4:]
-		sig, rest, ok := readLengthPrefixed(buf)
+		record, rest, ok := readLengthPrefixed(buf)
 		if !ok {
 			break
+		}
+		if len(record) < 4 {
+			buf = rest
+			continue
+		}
+		id := binary.LittleEndian.Uint32(record)
+		sig, _, ok := readLengthPrefixed(record[4:])
+		if !ok {
+			buf = rest
+			continue
 		}
 		for _, alg := range supportedSignatureAlgorithms {
 			if alg.id == id {
@@ -520,6 +526,8 @@ func findSignature(sequence []byte) (signatureAlgorithm, []byte, bool) {
 }
 
 // findDigest returns the digest with the requested signature algorithm id.
+// Each digest record is length-prefixed and contains the algorithm id followed
+// by a length-prefixed digest.
 func findDigest(signedData []byte, id uint32) ([]byte, bool) {
 	digests, _, ok := readLengthPrefixed(signedData)
 	if !ok {
@@ -527,14 +535,19 @@ func findDigest(signedData []byte, id uint32) ([]byte, bool) {
 	}
 	buf := digests
 	for len(buf) > 0 {
-		if len(buf) < 4 {
-			break
-		}
-		algID := binary.LittleEndian.Uint32(buf)
-		buf = buf[4:]
-		digest, rest, ok := readLengthPrefixed(buf)
+		record, rest, ok := readLengthPrefixed(buf)
 		if !ok {
 			break
+		}
+		if len(record) < 4 {
+			buf = rest
+			continue
+		}
+		algID := binary.LittleEndian.Uint32(record)
+		digest, _, ok := readLengthPrefixed(record[4:])
+		if !ok {
+			buf = rest
+			continue
 		}
 		if algID == id {
 			return digest, true
@@ -561,7 +574,7 @@ func apkContentDigest(path string, block *apkSigningBlock, h crypto.Hash) ([]byt
 
 	addChunk := func(chunk []byte) {
 		ch := h.New()
-		ch.Write([]byte{0x5a})
+		ch.Write([]byte{0xa5})
 		writeUint32(ch, uint32(len(chunk)))
 		ch.Write(chunk)
 		chunkDigests = append(chunkDigests, ch.Sum(nil)...)

@@ -13,7 +13,8 @@ and they do **not** all use the same rule:
 
 | Stage | Default (no `--stages`)? | Rule |
 |-------|--------------------------|------|
-| `apktool`, `jadx` (Android) | yes | `want()` — runs by default or when named |
+| `jadx` (Android) | yes | default tree producer |
+| `apktool` (Android) | **no** | only when named in `--stages` or `--decompiler apktool/both` |
 | `elf`, `anti-analysis`, `repack`, `sdk` (Android) | yes | `stageEnabled()` — runs by default or when named (in-process) |
 | `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`, `strings` (iOS) | yes | `want()` — runs by default or when named |
 | `gitleaks`, `semgrep` (both platforms) | **no** | `stageSet[...]` — **only when explicitly named** |
@@ -22,9 +23,12 @@ and they do **not** all use the same rule:
 
 Consequences of that split:
 
-- `analyze app.apk` runs `apktool + jadx + elf + anti-analysis + repack + sdk
-  + inventory` (+ implicit apksigner).
-- `analyze app.apk --stages apktool,jadx,gitleaks,semgrep` adds the scanners.
+- `analyze app.apk` runs `jadx + elf + anti-analysis + repack + sdk + inventory`
+  (+ implicit apksigner). `apktool` is no longer run by default: the native
+  inventory reader covers the manifest/resources/NSC, so the second full
+  decode was redundant.
+- `analyze app.apk --stages apktool,jadx,gitleaks,semgrep` runs both
+  decompilers and adds the scanners.
 - `analyze app.apk --stages inventory` runs only the in-process inventory
   phase (no external binary). It still reads the manifest, resources and DEX
   straight from the APK, so it works on a fresh session directory with no
@@ -43,6 +47,10 @@ Consequences of that split:
 - If a needed stage is missing from the list the result is silent, not
   broken: `--stages gitleaks` without `jadx` scans the (mostly empty)
   session directory — see *gitleaks/semgrep source directory* below.
+
+`--reuse` skips a decompiler whose `<session>/jadx` or `<session>/apktool`
+tree already exists (the session directory is keyed by the APK SHA-256), so a
+re-run only refreshes the scanners and reports.
 
 `--no-res` passes `-r` to apktool and `--no-res` to jadx (skips resource
 decoding; the manifest is still decoded). The native inventory reader is not
@@ -112,8 +120,8 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 
 | Stage | Wraps | Timeout | Artifacts | Findings fed | Required? |
 |-------|-------|---------|-----------|--------------|-----------|
-| `apktool` | `apktool d -f -o <dir> [-r] -- <apk>` | 10 min | `apktool/` (decoded `AndroidManifest.xml`, `res/`, `apktool.yml`) | none directly — feeds inventory | default, fail-soft |
-| `jadx` | `jadx --threads-count N -d <dir> [--no-res] -- <apk>` | 15 min | `jadx/` (sources + manifest) | none directly — feeds gitleaks/semgrep/inventory/triage context | default, fail-soft |
+| `apktool` | `apktool d -f -o <dir> [-r] -- <apk>` | 10 min | `apktool/` (decoded `AndroidManifest.xml`, `res/`, `apktool.yml`) | none directly — feeds inventory | opt-in (or `--decompiler`) |
+| `jadx` | `jadx --threads-count N -d <dir> [--no-res] -- <apk>` | 15 min | `jadx/` (sources + manifest) | none directly — feeds gitleaks/semgrep/inventory/triage context | default tree producer |
 | `elf` | in-process (no binary) | none | fills `inventory.json.native_libs` | `binary_hardening`, `native_code`, `obfuscation` | default |
 | `anti-analysis` | in-process (no binary) | none | — | `anti_analysis`, `obfuscation` | default |
 | `repack` | in-process (no binary) | none | — | `manifest_issue` (repackaging) | default |
@@ -306,7 +314,7 @@ yet: no `dexdc` stage exists, and `jadx` remains the default.
 
 | Goal | Stages |
 |------|--------|
-| Full Android report (default) | `apktool`, `jadx`, `elf`, `anti-analysis`, `repack`, `sdk`, `inventory` (+ implicit apksigner) |
+| Full Android report (default) | `jadx`, `elf`, `anti-analysis`, `repack`, `sdk`, `inventory` (+ implicit apksigner) |
 | Secrets from decompiled code | `jadx` **and** `gitleaks` (gitleaks alone scans a nearly empty dir) |
 | MASVS/MASTG rule matches | `jadx` **and** `semgrep` (needs a full source tree) |
 | Manifest/NSC findings only | `inventory` (reads the APK directly; a pre-seeded `jadx/` tree is only a fallback — `scripts/smoke.sh` also exercises that) |

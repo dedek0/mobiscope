@@ -231,3 +231,28 @@ func TestBuildMDData_UnknownSeverityGroup(t *testing.T) {
 	assert.Contains(t, sevs, "")
 	assert.Len(t, data.Groups, 2)
 }
+
+func TestMarkdownReporter_AttackSurface(t *testing.T) {
+	session := testSession()
+	session.App = models.AppInventory{
+		BundleID:    "com.example.app",
+		VersionName: "1.2.3",
+		TargetSDK:   "35",
+		Permissions: []string{"android.permission.CAMERA"},
+		SDKs:        []models.SDK{{Name: "OkHttp", Version: "4.12.0"}},
+		NativeLibs:  []models.NativeLib{{Path: "lib/arm64-v8a/libx.so", Archs: []string{"arm64-v8a"}}},
+		Network:     models.NetworkPolicy{Kind: "network_security_config", CleartextPermitted: true, Pinned: true},
+	}
+	session.SignatureScheme = "v3"
+	session.SigningCertFP = "dda7f0a5689c6e35c12ad5"
+
+	var buf bytes.Buffer
+	require.NoError(t, (&MarkdownReporter{}).Render(session, &buf))
+	out := buf.String()
+	assert.Contains(t, out, "## Attack surface")
+	assert.Contains(t, out, "com.example.app")
+	assert.Contains(t, out, "OkHttp 4.12.0")
+	assert.Contains(t, out, "network_security_config, cleartext allowed, pinned")
+	assert.Contains(t, out, "v3 (dda7f0a5689c6e35)")
+	assert.Contains(t, out, "android.permission.CAMERA")
+}
