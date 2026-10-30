@@ -88,6 +88,9 @@ and semgrep error notifications.
   `cargo audit`, and keep the build in a separate Docker stage.
 - Pseudocode that `semgrep` cannot parse produces silent false negatives,
   which is why the parse-error metric is a gate, not a nice-to-have.
+- The candidate can panic on some non-ASCII string literals (upstream
+  `char boundary` bug) while still exiting 0; the harness must check output
+  completeness, not only the exit status.
 - Backend-specific file/line locations can change deterministic finding IDs
   (ADR-002). A migration decision is required before switching defaults.
 

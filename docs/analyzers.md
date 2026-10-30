@@ -140,9 +140,11 @@ Details and known gaps:
   (`version_name`, `version_code`, `min_os`, `target_sdk` — the manifest
   alone does not carry them). The Docker wrapper is a shell shim that execs
   `java -jar`, which is why `java` is on the binary allowlist.
-- **jadx** — threads default to `runtime.NumCPU()`. DEX-related stderr lines
-  are extracted into `output.dex_warnings`. OOM on large APKs is the main
-  failure mode (`JAVA_OPTS=-Xmx4g`). The decoded tree is the preferred input
+- **jadx** — threads default to `runtime.NumCPU()`; `MOBISCOPE_JADX_THREADS`
+  caps them for memory-constrained runs. DEX-related stderr lines are
+  extracted into `output.dex_warnings`. OOM on large APKs is the main failure
+  mode (`JAVA_OPTS=-Xmx4g`); the invocation intentionally does not pass `--`
+  before the input (jadx 1.5.1 treats it as a command separator). The decoded tree is the preferred input
   for every scanner below; they resolve `analyzers.SourceRoot`
   (`jadx/` → `apktool/` → session root), so an apktool-only run still gets
   scanned.

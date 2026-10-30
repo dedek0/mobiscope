@@ -678,6 +678,20 @@ func selectedDecompilers(opts stageOptions) []string {
 	return out
 }
 
+// jadxThreadsFromEnv lets an evaluation run cap jadx parallelism without a
+// dedicated flag. Zero keeps the analyzer default (runtime.NumCPU()).
+func jadxThreadsFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("MOBISCOPE_JADX_THREADS"))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
 // cachedDEXDC reports whether a previous dexdc run left a non-empty tree.
 func cachedDEXDC(sessionDir string) bool {
 	entries, err := os.ReadDir(filepath.Join(sessionDir, "dexdc"))
@@ -731,7 +745,7 @@ func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Anal
 			if opts.reuse && opts.sessionDir != "" && cachedTree(opts.sessionDir, "jadx") {
 				continue
 			}
-			list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes}))
+			list = append(list, analyzers.NewJADX(analyzers.JADXConfig{NoRes: opts.noRes, Threads: jadxThreadsFromEnv()}))
 		case stageDEXDC:
 			if opts.reuse && opts.sessionDir != "" && cachedDEXDC(opts.sessionDir) {
 				continue

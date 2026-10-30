@@ -624,3 +624,12 @@ func TestIncludeDecompilers(t *testing.T) {
 	assert.Equal(t, []string{"inventory", "jadx", "dexdc"}, includeDecompilers([]string{"inventory"}, "jadx,dexdc"))
 	assert.Equal(t, []string{"jadx", "gitleaks"}, includeDecompilers([]string{"jadx", "gitleaks"}, "jadx"))
 }
+
+func TestJadxThreadsFromEnv(t *testing.T) {
+	t.Setenv("MOBISCOPE_JADX_THREADS", "")
+	assert.Equal(t, 0, jadxThreadsFromEnv())
+	t.Setenv("MOBISCOPE_JADX_THREADS", "4")
+	assert.Equal(t, 4, jadxThreadsFromEnv())
+	t.Setenv("MOBISCOPE_JADX_THREADS", "not-a-number")
+	assert.Equal(t, 0, jadxThreadsFromEnv())
+}

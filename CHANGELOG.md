@@ -49,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - jadx no longer receives a `--` separator before the input: jadx 1.5.1 treats
   it as a command separator and rejects every APK. `dexdc` excludes framework
   and large vendor packages by default to keep the optional tree within
-  memory.
+  memory; `MOBISCOPE_JADX_THREADS` caps jadx parallelism for constrained
+  hosts.
 - CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
   findings; `--baseline <findings.json|session.json>` suppresses known ones
   before triage.
