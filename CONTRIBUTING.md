@@ -34,7 +34,8 @@ Atomic commits, one logical change each.
 ## Architecture
 
 Design decisions live in `docs/adr/`. Remaining work is tracked in
-[PENDING.md](PENDING.md) — check there before starting something new.
+[docs/roadmap.md](docs/roadmap.md) ([Português](docs/roadmap.pt-BR.md)) — check
+there before starting something new.
 
 ## Security issues
 

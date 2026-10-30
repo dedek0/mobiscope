@@ -241,7 +241,8 @@ internal/
 
 Written references: [docs/analyzers.md](docs/analyzers.md) (per-stage
 behavior, versions, gaps), [docs/artifacts.md](docs/artifacts.md) (output
-formats) and [docs/adr/](docs/adr/) (design decisions).
+formats) and [docs/adr/](docs/adr/) (design decisions). The current plan is
+in [docs/roadmap.md](docs/roadmap.md) ([Português](docs/roadmap.pt-BR.md)).
 
 ## Scope and non-goals
 
@@ -343,7 +344,8 @@ Expected output ends with `SMOKE PASSED (11/11 checks passed)`. To keep the
 generated fixtures for inspection: `KEEP=1 make smoke-apk`.
 
 Design decisions: [docs/adr/](docs/adr/). Artifact formats: [docs/artifacts.md](docs/artifacts.md).
-Analyzers: [docs/analyzers.md](docs/analyzers.md). Remaining work: [PENDING.md](PENDING.md).
+Analyzers: [docs/analyzers.md](docs/analyzers.md). Remaining work and planned
+decompiler backends: [docs/roadmap.md](docs/roadmap.md) ([Português](docs/roadmap.pt-BR.md)).
 Changelog: [CHANGELOG.md](CHANGELOG.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

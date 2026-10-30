@@ -29,9 +29,10 @@ Consequences of that split:
   phase (no external binary).
 - gitleaks/semgrep **never run by accident**, but also never run unless you
   ask — a "default" run has no scanner findings from them.
-- Unknown stage names are silently ignored (no error). On iOS the inventory
-  phase must be requested as `inventory`, not `inventory-ios` — the trigger
-  checks `NameInventory` only, while the recorded tool is named
+- Unknown stage names are silently ignored (no error). Stage matching accepts
+  `-` and `_` interchangeably (`anti-analysis` == `anti_analysis`). On iOS the
+  inventory phase must be requested as `inventory`, not `inventory-ios` — the
+  trigger checks `NameInventory` only, while the recorded tool is named
   `inventory-ios`.
 - `apksigner` cannot be selected or disabled via `--stages`; it runs for
   Android targets whenever the context is live.
@@ -80,7 +81,7 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 | `gitleaks` | `gitleaks detect --source <dir> --report-format json --report-path <session>/gitleaks-report.json --no-git` | 10 min | `gitleaks-report.json` | `secret` | opt-in stage |
 | `semgrep` | `semgrep --config <materialized embedded pack> --sarif --output <session>/semgrep.sarif --quiet <dir>` | 15 min | `semgrep.sarif` | `code_pattern`, `secret`, `manifest_issue`, `network_config`, `pinning_indicator` | opt-in stage |
 | `inventory` | in-process (no binary) | none | — (plus shared `inventory.json`) | `manifest_issue`, `network_config`, `pinning_indicator`, `secret`, `code_pattern` | default |
-| `apksigner` | `apksigner verify --print-certs --verbose <apk>` | 2 min | — (fills `session.signing_cert_fp`, `signature_scheme`) | none wired (see below) | implicit, fail-soft |
+| `apksigner` | `apksigner verify --print-certs --verbose <apk>` | 2 min | — (fills `session.signing_cert_fp`, `signature_scheme`) | `manifest_issue` (debug-signed, no signer, v1-only) | implicit, fail-soft |
 
 Details and known gaps:
 
@@ -100,15 +101,21 @@ Details and known gaps:
   relocations, RPATH and `Java_*` JNI exports in `inventory.json.native_libs`.
   It also surfaces the anti-analysis strings found in the binary.
 - **anti-analysis** — parses the DEX class names to score obfuscation and
-  scans strings for root/emulator, anti-debug, instrumentation (Frida/Xposed)
-  and dynamic-code-loading markers. Emits `anti_analysis` and `obfuscation`
-  findings.
-- **repack** — flags a debug certificate, a certificate that does not match
-  `--expect-cert`, additional `classes*.dex` files, payloads hidden in
-  `assets/` and a uniform ZIP timestamp. Findings are `manifest_issue`.
+  scans DEX/executable assets (`.dex`, `.jar`, `.so`, `.apk`) for
+  root/emulator, anti-debug, instrumentation (Frida/Xposed) and
+  dynamic-code-loading markers. Data assets (Unity metadata, models, fonts)
+  are ignored to avoid generic-word false positives. Emits `anti_analysis`
+  and `obfuscation` findings and fills `inventory.json.obfuscation` (score,
+  class count, toolchain).
+- **repack** — reports a certificate that does not match `--expect-cert`,
+  executable payloads in `assets/` (`.dex`/`.jar`/`.apk`, high) and native
+  libraries in `assets/` (low). Multidex, a v2/v3-only signature and a
+  normalized ZIP timestamp are normal and are not reported. Findings are
+  `manifest_issue`; the converter is wired into the pipeline.
 - **sdk** — recognises third-party libraries from DEX class prefixes and
   recovers versions from decoded resources. Feeds `inventory.json.sdks`,
-  which is what `--osv` looks up.
+  which is what `--osv` looks up, and emits one informational
+  `manifest_issue` finding per library.
 - **gitleaks** — exit `0` (clean) and `1` (leaks found) are success;
   `>= 2` fails the stage (ADR-005; `--exit-code` is not overridden).
   The report *file* is preferred over stdout (stdout carries banners);
@@ -123,28 +130,32 @@ Details and known gaps:
   rule `properties`. Any non-zero exit fails the stage. Both packs use the
   top-level `rules:` wrapper (bare rule lists are rejected by semgrep
   1.127.1 with `was not a mapping`) and are guarded by
-  `TestRulePacks_SemgrepSchema`. The packs are embedded in the binary and
-  materialized to a temp directory for semgrep; validate manually with
-  `semgrep --validate --config internal/rules/mastg/rules.yaml`.
+  `TestRulePacks_SemgrepSchema`; the Android pack also validates with
+  `semgrep --validate --config internal/rules/mastg/rules.yaml`. The packs
+  are embedded in the binary and materialized to a temp directory for
+  semgrep.
 - **inventory** — reads `jadx/AndroidManifest.xml`, falling back to
   `apktool/AndroidManifest.xml` and then the session root,
   decodes it with `encoding/xml` (legacy regex fallback for non-XML),
   resolves the network security config via
   `android:networkSecurityConfig="@xml/…"`, then pattern-scans the tree with
   `scanRules` (AWS/GCP/GitHub/Slack tokens, Azure connection strings, JWTs,
-  private keys, Firebase URLs, predictable IVs, IPs, emails, pinning
-  markers). Caps: extensions
+  private keys, Firebase URLs, predictable IVs). Caps: extensions
   `.java .smali .xml .kt .json .properties .cfg`, files <= 2 MiB
-  (`maxScanFileSize`), symlinks never followed. Generic URLs are demoted to
-  the `url_count`/`urls` aggregate in `inventory.json`. Gaps: scanner-style
-  findings do not set `platform`; IP/email patterns are intentionally loose.
-- **apksigner** — not selectable, and its `ToolResult` is **not** recorded
-  in `session.json`/`meta.json`: only `signing_cert_fp` and
-  `signature_scheme` land on the session. When the binary is missing
-  (including the Docker image), `metaInfHeuristic` scans `META-INF/*.RSA|DSA|EC`
-  and reports `v1`/`none`. `ConvertApkSignerFindings` (debug-signed,
-  v1-only, no-signer findings) exists but is not wired into
-  `pipeline.convertFindings`, so those findings are never emitted today.
+  (`maxScanFileSize`), symlinks never followed.
+  Generic URLs (`url_count`/`urls`), IPs (`ip_count`/`ips`), e-mails
+  (`email_count`/`emails`) and pinning markers
+  (`pinning_indicators`/`pinning_count`) are aggregate inventory data, not
+  findings; pinning produces one informational finding per app. Private keys
+  require a complete PEM block with a valid base64 body, and the body is
+  redacted. Client-side identifiers (GCP API key, Google OAuth client ID,
+  Firebase URL) are `info`/`public`. Every finding sets `platform`.
+- **apksigner** — runs implicitly and is not selectable. Its findings
+  (debug-signed, no signer, v1-only) are wired through
+  `ConvertFindings`; `signing_cert_fp` and `signature_scheme` also land on
+  the session. When the binary is missing (including the Docker image),
+  `metaInfHeuristic` checks `META-INF/*.RSA|DSA|EC` **and** the v2/v3 APK
+  Signing Block, so a modern v2/v3-only APK is not reported as unsigned.
 
 ## iOS stages
 
@@ -203,8 +214,16 @@ Details and known gaps:
   `analyzers.SourceRoot`: `jadx/` first, then `apktool/`, then the session
   root. On iOS (no `jadx/`, no `apktool/`) that means the *whole session
   directory* (including `extract/`) is scanned: there is no platform-aware
-  resolver yet (PENDING.md §1.6). `inventory-ios` must be requested as
-  `--stages inventory`.
+  resolver yet (see [docs/roadmap.md](roadmap.md), P1). `inventory-ios`
+  must be requested as `--stages inventory`.
+
+## Decompiler backends (planned)
+
+`jadx` is the current tree producer. A pluggable backend and the evaluation
+of [`androguard/dex-decompiler`](https://github.com/androguard/dex-decompiler)
+are planned in [docs/roadmap.md](roadmap.md) and
+[ADR-009](adr/009-decompiler-backends.md). The backend is **not implemented**
+yet: no `dexdc` stage exists, and `jadx` remains the default.
 
 ## What each flow needs
 

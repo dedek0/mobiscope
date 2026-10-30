@@ -11,10 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - In-process Android analyzers: `elf` (native-library hardening, JNI
   exports, anti-analysis strings), `anti-analysis` (obfuscation plus
-  root/emulator/anti-debug/instrumentation markers), `repack` (debug or
-  unexpected certificate, extra DEX files, payloads hidden in assets,
-  uniform ZIP timestamps) and `sdk` (third-party library inventory). They run
-  directly on the APK, without a decompiler.
+  root/emulator/anti-debug/instrumentation markers), `repack` (unexpected
+  certificate, executable/native payloads in assets) and `sdk` (third-party
+  library inventory). They run directly on the APK, without a decompiler.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the
@@ -64,9 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Executive summary in `report.md` (severity rollup, top clusters/categories,
   triage count + cost); the Markdown report template is now fully English.
 - `docs/adr/004`–`009` (platform detection, ErrExit, binary allowlist, retry
-  policy, pipeline phases, ASC deferral), `docs/artifacts.md`,
-  `docs/analyzers.md`, goreleaser + release workflow, optional pre-commit
-  hooks, macOS CI soft-fail job for darwin-only tools.
+  policy, pipeline phases, decompiler backends), `docs/artifacts.md`,
+  `docs/analyzers.md`, `docs/roadmap.md` (with a Portuguese version),
+  goreleaser + release workflow, optional pre-commit hooks, macOS CI
+  soft-fail job for darwin-only tools.
 - Tests: `platform.Detect` fuzzing, `handleLLMTest` routing/cloud refusal,
   concurrent + corrupt-cache tests, semgrep exit codes, direct
   `buildAnalyzers`/`runTriage`/`countTriaged` coverage, apksigner parse and
@@ -89,6 +89,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Android signal quality:** pinning is reported once per app instead of once
+  per occurrence; IPs and e-mails moved from findings to
+  `inventory.json` (`ip_count`/`ips`, `email_count`/`emails`); GCP API keys,
+  Google OAuth client IDs and Firebase URLs are informational client-side
+  identifiers; private keys are redacted from evidence.
+- `report.md` renders one row per cluster plus an “N more occurrences” count;
+  `findings.json`/`report.sarif` still contain every occurrence.
+- `repack` no longer flags multidex, a v2/v3-only signature or a normalized ZIP
+  timestamp (normal for modern apps); it reports executable/native payloads
+  in `assets/` instead.
+- `inventory.json.network.kind` is only set when a network security config
+  exists, and `obfuscation` is populated from the `anti-analysis` stage.
+- `--stages` accepts hyphen/underscore spellings (`anti-analysis` and
+  `anti_analysis`), so the documented name actually selects the analyzer.
 - Semgrep rule packs moved from `rules/` to `internal/rules/` and are
   embedded in the binary, then materialized to a process-owned temp
   directory for semgrep.
@@ -111,6 +125,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Repack` and `SDK` did not implement `ConvertFindings`, so the pipeline's
+  `FindingConverter` assertion skipped them and repack never emitted findings.
+- A header-only PEM constant (JSch/Netty) was reported as a critical private
+  key; the rule now requires a complete, base64-valid block and redacts it.
+- When `apksigner` was unavailable, a v2/v3-only APK was reported as
+  “no signer”; the fallback now detects the APK Signing Block.
+- `inventory` pattern findings had `platform: null`; every Android finding now
+  sets `platform: android`.
+- `--stages anti-analysis` was silently ignored because the analyzer is named
+  `anti_analysis`; stage matching now normalizes `-`/`_`.
+- The anti-analysis stage scanned every `assets/` blob for markers; generic
+  words in Unity metadata produced Frida/Xposed/root false positives. It now
+  scans only executable assets, and the bare `su`/`gadget` needles were
+  removed.
+- The Docker build failed on the jammy base because the bundled `pip3`
+  segfaulted while resolving semgrep; pip is upgraded before the install.
+- `make install-tools` used the pre-v2 golangci-lint module path.
+- Android semgrep rules over-matched (`checkServerTrusted`, any
+  `SecretKeySpec`, any file mode, any `proceed()`) and the pack contained an
+  invalid `$PBEKeySpec(...)` pattern that made it unloadable. The pack now
+  validates under `semgrep 1.127.1`.
 - TOML config file and environment variables were never actually loaded.
 - `--config` and `--provider` flags were documented but not wired.
 - LLM triage results were written to disk before enrichment and lost.

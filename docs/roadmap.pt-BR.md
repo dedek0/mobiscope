@@ -1,0 +1,257 @@
+# Roadmap
+
+**Status:** documento vivo · atualizado em 2026-10-30
+**English:** [roadmap.md](roadmap.md)
+
+Este arquivo registra o que foi feito, o que vem a seguir e as decisões por
+trás de cada passo. Use junto com
+[docs/analyzers.md](analyzers.md) (referência por estágio) e
+[docs/artifacts.md](artifacts.md) (schema dos artefatos).
+
+## Princípios
+
+1. **Sinal antes de volume.** Finding que dispara em toda biblioteca de
+   terceiros é ruído. Agregue ou remova.
+2. **Não depender de um decompilador para fatos básicos.** Manifest,
+   resources, strings dos DEX e material de assinatura podem ser lidos direto
+   do APK.
+3. **Todo backend novo é opcional e fail-soft.** Ferramenta ausente degrada o
+   relatório, nunca quebra o pipeline.
+4. **Findings continuam determinísticos.** Os IDs derivam de ferramenta,
+   categoria, arquivo, linha e snippet (ADR-002). Mudanças de backend que
+   alterem localização exigem decisão explícita de compatibilidade.
+5. **Documente a decisão, não só a tarefa.** Escolhas arquiteturais ganham um
+   ADR em [docs/adr/](adr/).
+
+## Estado atual (Android)
+
+O run padrão (`mobiscope analyze app.apk`) executa `apktool`, `jadx`,
+`apksigner`, `elf`, `anti-analysis`, `repack`, `sdk` e `inventory`.
+`gitleaks` e `semgrep` são opt-in via `--stages`.
+
+Pontos fortes:
+
+- Hardening de ELF e anti-analysis in-process, direto do APK.
+- Manifest decodificado com `encoding/xml` e NSC resolvido pelo manifest.
+- Findings determinísticos, dedup/clustering, SARIF e Markdown.
+- Triage por LLM provider-agnostic com gate local para secrets.
+
+As lacunas estão agrupadas abaixo. O P0 está implementado; P1–P3 são o plano.
+
+## P0 — qualidade do sinal (feito)
+
+Estas mudanças removeram o ruído que tornava ilegível um relatório real
+(TP-Link IoT, 47 mil entradas ZIP, 18 DEX): 1.597 findings, sendo 1.080 de
+pinning, 424 de IP e 43 de e-mail.
+
+### Findings e agregação
+
+- **Pinning é propriedade do app.** O `inventory` emite um único finding
+  informativo listando os marcadores (`X509TrustManager`, `CertificatePinner`,
+  `TrustKit`, `sha256/`, `pin-sha256`, `BEGIN CERTIFICATE`). O agregado fica
+  em `inventory.json` (`pinning_indicators`, `pinning_count`).
+- **IPs e e-mails são inventário, não findings.** `ip_count`/`ips` e
+  `email_count`/`emails` são amostras limitadas e ordenadas.
+- **Platform sempre preenchida.** Todo finding do `inventory` agora carrega
+  `platform: android`.
+- **Private key exige bloco PEM completo.** Constantes que só têm o header
+  (JSch, Netty e afins) não geram mais falso positivo crítico. O bloco precisa
+  ter corpo base64 válido, e o corpo é redigido de evidências, relatórios e
+  prompts do LLM.
+- **Chaves client-side são informativas.** GCP API key, OAuth client ID e URL
+  do Firebase são identificadores, não segredos de servidor; saem como `info`
+  com explicação.
+- **Repack recalibrado.** Multidex, assinatura só v2/v3 e timestamp
+  normalizado são normais e não geram mais finding. O estágio reporta
+  payloads executáveis em `assets/` (high) e bibliotecas nativas em `assets/`
+  (low).
+- **Findings de repack e SDK realmente emitidos.** `Repack` e `SDK` agora
+  implementam `ConvertFindings`, então a asserção `FindingConverter` do
+  pipeline chega neles.
+- **Falsos positivos de anti-analysis removidos.** O estágio não varre mais
+  assets de dados (metadata do Unity e afins); só DEX e assets executáveis.
+  As needles soltas `su`/`gadget` saíram, então palavras comuns não disparam
+  mais root/Frida.
+- **`--stages` normaliza hífen/underscore.** `anti-analysis` e `anti_analysis`
+  agora selecionam o mesmo analyzer; antes a forma documentada com hífen não
+  casava com nada.
+- **Relatório mostra representantes de cluster.** O `report.md` renderiza o
+  representante de cada cluster + “N ocorrências”; `findings.json` e
+  `report.sarif` mantêm todas.
+
+### Assinatura
+
+- Findings do `apksigner` estão ligados ao pipeline (debug-signed, sem
+  assinante, só v1).
+- Quando o `apksigner` não existe (a imagem Docker não o traz), o fallback
+  agora detecta o **APK Signing Block** (v2/v3) em vez de assumir que a
+  ausência de `META-INF/*.RSA` significa “sem assinatura”. Isso remove um
+  falso crítico em APKs modernos.
+
+### Pack semgrep
+
+O pack Android agora valida no `semgrep 1.127.1`
+(`semgrep --validate --config internal/rules/mastg/rules.yaml`). Correções:
+
+- `mastg-trustmanager-bypass` só casa trust check vazio, não toda
+  implementação de `checkServerTrusted`.
+- `mastg-crypto-hardcoded-key` só casa chave literal.
+- `mastg-storage-world-accessible` só casa `MODE_WORLD_*`.
+- `mastg-crypto-no-padding` casa transformações `".../NoPadding"`.
+- `mastg-webview-ssl-error` só inspeciona handlers `onReceivedSslError`.
+- `mastg-webview-file-access` usa severidade válida do semgrep.
+- `mastg-exported-component` é limitado a `AndroidManifest.xml`.
+- `mastg-crypto-pbe-weak` tinha padrão inválido (`$PBEKeySpec(...)`) que
+  tornava o pack inteiro inutilizável; agora usa `new PBEKeySpec(...)`.
+
+### Inventário
+
+- `obfuscation` é preenchido pelo estágio `anti-analysis` (ratio, número de
+  classes, toolchain).
+- `network.kind` só é preenchido quando existe network security config;
+  `cleartext_permitted` e `pinned` vêm dela.
+
+## P1 — análise Android nativa
+
+Objetivo: tornar os checks principais independentes de `apktool`/`jadx` e
+rápidos o suficiente para CI.
+
+1. **Parser de AXML e `resources.arsc` em Go.**
+   Ler o manifest binário e os resources direto do APK. Mantém
+   manifest/permissões/NSC funcionando quando os decompiladores falham (OOM
+   em APK grande) e dá sentido ao `--quick`.
+2. **Scanner da string table dos DEX.**
+   Extrair a string pool de cada `classes*.dex` e rodar os padrões de secret,
+   URL, IP, pinning e anti-analysis. Fecha a lacuna de `semgrep` ser opt-in e
+   só ver `.java`.
+3. **Parse completo do network security config.**
+   `cleartextTrafficPermitted` por domínio, `debug-overrides`,
+   `pin-set`/`expiration`, trust anchors → `inventory.network.exceptions` e
+   findings por domínio.
+4. **Checks de manifest targetSdk-aware.**
+   - Defaults de `android:exported` dependem de `targetSdk` e do tipo.
+   - App Links: `autoVerify` ausente + host é risco de hijack; checar
+     `assetlinks.json` quando acessível.
+   - Task hijacking: combinar `taskAffinity`, `launchMode` e
+     `allowTaskReparenting`.
+   - Default de `usesCleartextTraffic` por `targetSdk`; `android:permission`
+     no application; `<grant-uri-permission>`; defaults de provider.
+   - Parse de `dataExtractionRules`/`fullBackupContent` e sinalização de
+     diretórios sensíveis.
+5. **Origem do finding.** Marcar cada finding como `app` ou `sdk:<nome>` usando
+   os prefixos que o estágio `sdk` já detecta. É a diferença entre “OkHttp
+   menciona X509TrustManager” e “o app desativa validação de TLS”.
+
+## P2 — cobertura
+
+- **Kotlin e taint.** O pack atual é só Java. Adicionar regras Kotlin e regras
+  em modo taint (deeplink/intent/clipboard → WebView, SQL, arquivo, exec,
+  log), Intent redirection, `ContentProvider.openFile` traversal, PendingIntent
+  mutável, clipboard e log de PII.
+- **Profundidade nativa.** `RegisterNatives`, libs empacotadas/criptografadas
+  (entropia e assinaturas de packers), `.so` em `assets/`, SONAME/versão para
+  OSV.
+- **Detecção de SDK.** Mais assinaturas (HMS, Tencent, Alipay, WeChat, Umeng),
+  versão via `BuildConfig`/resources, SDKs native-only. Sem versão, o `--osv`
+  tem pouco para casar.
+- **Assinatura em Go.** Parse do APK Signing Block v2/v3/v3.1, subject,
+  validade, tamanho de chave, rotação e source stamp. A imagem Docker não tem
+  `apksigner`.
+- **Estágio de obfuscação.** R8/DexGuard, string encryption, reflection e
+  `--mapping` para deobfuscar símbolos.
+- **Diff, baseline e gate de CI.** `mobiscope diff old.apk new.apk`,
+  `--baseline`, `--fail-on <severity>` e allowlist documentada para
+  identificadores públicos conhecidos e componentes AndroidX.
+- **Validar nomes de estágio.** Um `--stages` inválido hoje é ignorado em
+  silêncio; deve falhar listando os válidos.
+
+## P3 — performance e relatório
+
+- Parar de rodar os dois decompiladores completos por padrão. Se o `jadx` roda,
+  o `apktool` pode ir com `-s` (só resources) ou ser substituído pelo parser
+  nativo de AXML/arsc.
+- Cachear saída de decompilador por SHA do APK e oferecer `--reuse`.
+- `scanPatterns`: prefilter com `strings.Contains`/Aho-Corasick, pular
+  diretórios de vendor e paralelizar o walk.
+- Relatório: representantes + contagens, seção de superfície (permissões,
+  componentes, deeplinks, SDKs, nativas, assinatura) e top N por categoria.
+- Triage: enviar só representantes com severidade ≥ `low`; hoje 1.597 findings
+  viram custo de LLM.
+- Fixtures golden com os traps de falso positivo (PEM em código de parser,
+  chaves Firebase, multidex, timestamp de zipalign) para travar o
+  comportamento.
+
+## Backends de decompilação
+
+O pipeline hoje fixa o `jadx` como produtor da árvore. É a parte mais lenta e
+frágil do run: timeout de 15 minutos e risco de OOM em APKs grandes.
+
+### Candidato: `androguard/dex-decompiler`
+
+O [androguard/dex-decompiler](https://github.com/androguard/dex-decompiler) é
+um decompilador DEX → Java em Rust puro, da própria org do Androguard
+(Apache-2.0). Propriedades relevantes:
+
+- export de árvore completa (`-d out/`), compatível com o contrato atual de
+  `SourceRoot`/gitleaks/semgrep/inventory;
+- fast path de consulta (`--getclass`, `--findrefs`) sem índice global;
+- análise de segurança embutida: `--scan-vulns`, `--scan-semgrep` (MASTG) e
+  `--taint-solve` (taint interprocedural estilo Mariana Trench);
+- API de biblioteca Rust e bindings Python;
+- sem JVM e com pegada de memória baixa.
+
+Ele **não** decodifica `res/` nem `resources.arsc`, então não substitui o
+`apktool` para resources. O parser nativo de AXML/arsc do P1 é o complemento.
+
+### Forma de integração (proposta, não implementada)
+
+- `--decompiler jadx|dexdc|both`, padrão `jadx`.
+- Estágio opcional `dexdc`, fail-soft, commit pinado, entrada em
+  `allowedBinaries`, saída em `<session>/dexdc/`.
+- `SourceRoot` resolve o backend escolhido explicitamente; uma sessão nunca
+  mistura duas árvores em silêncio.
+- Converters de `--scan-vulns` e `--taint-output` viram `Finding` com
+  `SourceTool=dexdc` e mapeamento de categoria; dedup por regra/MASVS contra
+  os findings de semgrep/gitleaks.
+- O `jadx` continua como backend de referência até a avaliação abaixo passar.
+
+Veja o [ADR-009](adr/009-decompiler-backends.md).
+
+### Harness de avaliação (critérios de aceite)
+
+Rodar os dois backends no mesmo APK (começando por um alvo real grande) e
+comparar:
+
+| Métrica | Meta |
+|---------|------|
+| Recall de findings conhecidos (secrets, pinning, manifest) | ≥ 95% do run com jadx |
+| Taxa de erro de parse do semgrep na árvore emitida | < 5% |
+| Tempo de export da árvore completa (APK de 230 MB) | < 30 s |
+| RSS de pico | < 1 GB |
+| IDs do `findings.json` | estáveis ou mudança documentada |
+| `--findrefs` em 20 sinks conhecidos | classe/método corretos em todos |
+
+Não promover o backend a padrão só com benchmark; o resultado diferencial é a
+entrada da decisão.
+
+### Riscos
+
+- Tanto o decompilador quanto seus scanners são jovens (0.1.x); saída e
+  semântica das regras podem mudar. Pine um commit exato e mantenha o `jadx`.
+- Pseudocódigo que o semgrep não parseia gera falso negativo silencioso.
+- Taint engines podem ter falso positivo e, pior, falso negativo; trate a saída
+  como fonte adicional com confiança própria.
+- Backend novo pode mudar arquivo/linha e, portanto, os IDs determinísticos.
+  Decida entre normalizar a localização para classe/método ou aceitar migração.
+- Sem releases publicados: compile de um commit pinado, versione o
+  `Cargo.lock`, rode `cargo audit` e mantenha o toolchain em um stage Docker
+  separado.
+
+## Ordem sugerida
+
+1. P0 (feito) — tornar o relatório legível.
+2. P1.1/1.2/1.5 — parse nativo de manifest/DEX e origem do finding.
+3. P2 diff/baseline/gate de CI — tornar a ferramenta usável em pipeline.
+4. P2 Kotlin/taint e assinatura em Go.
+5. Avaliação do backend de decompilação, depois `--fast`.
+6. P3 performance/relatório.

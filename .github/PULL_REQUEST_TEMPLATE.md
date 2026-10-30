@@ -10,4 +10,4 @@
 
 - [ ] `make check` passes
 - [ ] New tests cover the change
-- [ ] Docs updated (README / PENDING.md / CHANGELOG as applicable)
+- [ ] Docs updated (README / docs/roadmap.md / CHANGELOG as applicable)

@@ -10,10 +10,10 @@ Tool wrappers build argv for executables found on PATH and run them with the
 privileges of the mobiscope process (including inside the analysis container,
 where decompiled content from an untrusted app is present). Dynamic `exec` is
 flagged by gosec (G204), and a PATH hijack or a bad wrapper would let the
-pipeline run arbitrary programs. `PENDING.md` §1.3 already established the
-house rules for wrapping tools ("add every new binary to `allowedBinaries`",
-"pass the target after `--`", "`Available()` must fail soft"), but the rule
-was not yet written down as a decision.
+pipeline run arbitrary programs. The project's wrapper rules already
+established the house rules for wrapping tools ("add every new binary to
+`allowedBinaries`", "pass the target after `--`", "`Available()` must fail
+soft"), but the rule was not yet written down as a decision.
 
 ## Decision
 
@@ -31,7 +31,7 @@ Adding a wrapper therefore means:
 1. Implement `Analyzer` (`Name`, `Available`, `Run`).
 2. Add the binary name to `allowedBinaries`.
 3. Pass the target after `--`; prefer writing tool output to a file under the
-   session dir over scraping stdout (PENDING.md §1.3).
+   session dir over scraping stdout.
 
 `Available()` is fail-soft by construction:
 
@@ -82,4 +82,4 @@ Adding a wrapper therefore means:
 - internal/analyzers/apksigner.go (fail-soft Available + META-INF fallback)
 - internal/pipeline/pipeline.go (dry-run availability surface)
 - Dockerfile (where the allowlisted binaries come from)
-- PENDING.md §1.3 (wrapper rules this ADR ratifies)
+- [docs/roadmap.md](../roadmap.md) (current plan)

@@ -50,7 +50,7 @@ Everything below is written by `internal/pipeline/pipeline.go`
 | `inventory.json` | pipeline phase 3b | once per run (always, even when `inventory` is not a selected stage) |
 | `sbom.cdx.json` | `--sbom` flag, after the pipeline | once per run |
 | `gitleaks-report.json`, `semgrep.sarif` | external tools | each time the stage runs |
-| `SHA256SUMS` | **not implemented** | planned in PENDING.md §2.4 (chain of custody); today the SHA-256 only appears as `apk_hash` (session.json) / `apk_sha256` (meta.json) |
+| `SHA256SUMS` | **not implemented** | planned in [docs/roadmap.md](roadmap.md) (P2, chain of custody); today the SHA-256 only appears as `apk_hash` (session.json) / `apk_sha256` (meta.json) |
 
 ## findings.json
 
@@ -63,14 +63,14 @@ file, then line (`report.SortFindingsBySeverity`). Empty runs produce `[]`.
 |-------|------|-------|
 | `id` | string | Deterministic 16-hex ID — see [Determinism](#determinism-of-finding-ids) |
 | `session_id` | string | Equals the session directory name |
-| `source_tool` | string | `gitleaks`, `semgrep`, `inventory`, `inventory-ios`, `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`, `strings` |
+| `source_tool` | string | `gitleaks`, `semgrep`, `inventory`, `inventory-ios`, `ipa-extract`, `plist`, `macho`, `codesign`, `classdump`, `strings`, `elf`, `anti_analysis`, `repack`, `sdk`, `apksigner` |
 | `category` | enum | `secret`, `code_pattern`, `manifest_issue`, `network_config`, `pinning_indicator`, `entitlement`, `binary_hardening`, `obfuscation`, `native_code`, `privacy` |
 | `title`, `description`, `evidence` | string | last two are `omitempty` |
 | `location` | object | `file` (relative to the scanned root), `line` (always present, `0` when unknown — no `omitempty`), `snippet` |
 | `severity` | enum | `critical`, `high`, `medium`, `low`, `info` (unknown values are preserved on read for forward compatibility) |
 | `sensitivity` | enum | `public`, `internal`, `confidential`, `secret` |
 | `confidence` | float | 0..1, omitted when `0` |
-| `platform` | enum | `android` / `ios` / `unknown`. **Set** by every iOS converter and by the Android manifest/NSC findings; **omitted** by scanner findings (gitleaks, semgrep, inventory pattern scan). `session.platform` is authoritative |
+| `platform` | enum | `android` / `ios` / `unknown`. Set by every iOS converter and by all Android converters (manifest, NSC, inventory pattern scan, ELF, anti-analysis, repack, SDK, apksigner). `session.platform` is authoritative |
 | `rule_id` | string | Semgrep rule ID only |
 | `masvs`, `mastg` | []string | From semgrep rule metadata surfaced in SARIF `rule.properties` |
 | `maswe`, `cwe` | []string | Schema-reserved: the converter can read `cwe` from rule metadata, but no shipped rule pack declares `cwe`/`maswe` today |
@@ -242,9 +242,9 @@ emits, documented for schema completeness:
 run, which is what makes dedup, run-to-run diffing and the LLM cache work
 (ADR-002). NUL separators prevent field-shifting collisions
 (`file="a.java", line=12` vs `file="a.java1", line=2`). IDs changed once
-(before `0.1.0`, see PENDING.md §8.1): `findings.json` produced by older
-builds will not reproduce the same IDs. An ID changes whenever the snippet
-changes — by design, that is a different finding.
+(before `0.1.0`; see ADR-002): `findings.json` produced by older builds will
+not reproduce the same IDs. An ID changes whenever the snippet changes — by
+design, that is a different finding.
 
 ## session.json
 
@@ -298,9 +298,14 @@ struct order.
     "min_os": "24",
     "target_sdk": "34",
     "debuggable": true,
-    "obfuscation": {},
+    "obfuscation": {
+      "android": true,
+      "score": 0.72,
+      "indicators": ["classes=4120", "toolchain=R8/ProGuard"]
+    },
     "network": {
-      "kind": "network_security_config"
+      "kind": "network_security_config",
+      "cleartext_permitted": false
     },
     "permissions": [
       "android.permission.CAMERA",
@@ -477,14 +482,20 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
 | `target_sdk` | string | Android only (from `apktool.yml`) |
 | `debuggable` | bool | Android only (`android:debuggable`) |
 | `permissions` | []string | Android only (declared `<uses-permission>` entries) |
-| `network` | object | both; only `kind` is populated today (`network_security_config` / `NSAppTransportSecurity`) |
-| `obfuscation` | object | always emitted as `{}` today — obfuscation signals are reported as `anti_analysis`/`obfuscation` findings, not inventory |
+| `network` | object | both; Android populates `kind` (`network_security_config`) only when an NSC exists, plus `cleartext_permitted` and `pinned`; iOS uses `NSAppTransportSecurity` facts |
+| `obfuscation` | object | Android: populated by the `anti-analysis` stage (`score`, `indicators` such as class count, short-name ratio and toolchain) |
 | `native_libs` | []object | Android only, `omitempty`: populated by the `elf` stage (hardening flags, JNI exports, anti-analysis strings) |
 | `sdks` | []object | Android only, `omitempty`: third-party libraries detected by the `sdk` stage (`name`, `group`, `artifact`, `version`, `package`, `evidence`, `confidence`) |
 | `vulnerabilities` | []object | Android only, `omitempty`: OSV advisories for `sdks`, written only with `--osv` (`id`, `summary`, `severity`, `package`, `version`, `fixed_in`, `aliases`, `reference`) |
 | `entitlements`, `url_schemes` | — | schema-reserved: never written by the current collectors |
 | `url_count` | int | Android only, `omitempty`: total generic `http(s)://` matches in the scanned tree (the generic URL rule was demoted from findings to this aggregate) |
 | `urls` | []string | Android only, `omitempty`: up to 100 unique normalized URLs, sorted — a sample, not the full set |
+| `ip_count` | int | Android only, `omitempty`: total IPv4 matches; IPs are inventory data, never findings |
+| `ips` | []string | Android only, `omitempty`: up to 50 unique IPs, sorted |
+| `email_count` | int | Android only, `omitempty`: total e-mail matches |
+| `emails` | []string | Android only, `omitempty`: up to 50 unique e-mail addresses, sorted |
+| `pinning_indicators` | []string | Android only, `omitempty`: pinning markers found (`X509TrustManager`, `CertificatePinner`, `TrustKit`, `sha256/`, `pin-sha256`, `BEGIN CERTIFICATE`) |
+| `pinning_count` | int | Android only, `omitempty`: total occurrences across the scanned tree |
 
 ### Example (Android)
 
@@ -496,9 +507,15 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
   "min_os": "24",
   "target_sdk": "34",
   "debuggable": true,
-  "obfuscation": {},
+  "obfuscation": {
+    "android": true,
+    "score": 0.72,
+    "indicators": ["classes=4120", "toolchain=R8/ProGuard", "short_class_names=72%"]
+  },
   "network": {
-    "kind": "network_security_config"
+    "kind": "network_security_config",
+    "cleartext_permitted": true,
+    "pinned": true
   },
   "permissions": [
     "android.permission.CAMERA",
@@ -508,7 +525,13 @@ ID). Written unconditionally in phase 3b from the decoded manifest /
   "urls": [
     "https://api.example.com/v1",
     "https://firebase.example.com"
-  ]
+  ],
+  "ip_count": 3,
+  "ips": ["10.0.0.1", "192.168.1.1"],
+  "email_count": 2,
+  "emails": ["support@example.com"],
+  "pinning_indicators": ["CertificatePinner", "sha256/"],
+  "pinning_count": 14
 }
 ```
 
@@ -623,12 +646,14 @@ runs.
 
 Human-readable Markdown rendered from
 `internal/report/templates/report.md.tmpl` (counts by severity/category and
-a table per severity group). It is regenerated together with
+one section per severity group). It renders the representative of each
+cluster plus an “and N more occurrence(s)” line; `findings.json` and
+`report.sarif` keep every occurrence. It is regenerated together with
 `findings.json`, so it always reflects the latest triage state.
 
 ## SHA256SUMS
 
-**Not written today.** PENDING.md §2.4 plans a `SHA256SUMS` chain-of-custody
-file; until it exists, integrity references are `apk_hash` in
-`session.json` and `apk_sha256` in `meta.json` (plus the `--expect-sha256`
-gate before analysis starts).
+**Not written today.** [docs/roadmap.md](roadmap.md) (P2) plans a
+`SHA256SUMS` chain-of-custody file; until it exists, integrity references are
+`apk_hash` in `session.json` and `apk_sha256` in `meta.json` (plus the
+`--expect-sha256` gate before analysis starts).

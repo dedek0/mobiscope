@@ -9,10 +9,10 @@ Accepted
 APK and IPA are both ZIP archives (`PK\x03\x04`), so magic bytes alone cannot
 discriminate them. Before `internal/platform` existed, `analyze` treated every
 input as an APK: an IPA fed to the CLI ran apktool/jadx and produced an empty,
-"clean" report. PENDING.md §1.1 recorded the design intent: inspect the ZIP
-central directory (no full extract), use the filename extension only as a
-tiebreaker, and reject unknown platforms with a clear error before any tool
-runs.
+"clean" report. The platform-detection design intent was recorded before
+implementation: inspect the ZIP central directory (no full extract), use the
+filename extension only as a tiebreaker, and reject unknown platforms with a
+clear error before any tool runs.
 
 ## Decision
 
@@ -69,4 +69,4 @@ Guards around the decision:
 - internal/platform/platform_test.go
 - cmd/mobiscope/analyze.go (Detect call, `buildAnalyzers` dispatch)
 - internal/models/platform.go (Platform enum: android/ios/unknown)
-- PENDING.md §1.1 (original design intent)
+- [docs/roadmap.md](../roadmap.md) (current plan)
