@@ -35,7 +35,8 @@ Known strengths:
 - Deterministic findings, dedup/clustering, SARIF and Markdown output.
 - Provider-agnostic LLM triage with a local secret gate.
 
-Known gaps are grouped below. P0 and P1 are implemented; P2–P3 are planned.
+Known gaps are grouped below. P0, P1 and most of P2 are implemented; the
+remaining P2 items and P3 are planned.
 
 ## P0 — signal quality (done)
 
@@ -156,7 +157,7 @@ decoded tree when the native parse fails. See
    semgrep/gitleaks findings, so “OkHttp mentions X509TrustManager” and “the
    app disables TLS validation” are distinguishable in the report.
 
-## P2 — coverage
+## P2 — coverage (mostly done)
 
 - **Kotlin and taint.** (done) The pack has Kotlin-specific rules (hardcoded
   secrets, `addJavascriptInterface`, sensitive logging, weak ciphers, SQL

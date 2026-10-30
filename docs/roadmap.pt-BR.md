@@ -36,7 +36,8 @@ Pontos fortes:
 - Findings determinísticos, dedup/clustering, SARIF e Markdown.
 - Triage por LLM provider-agnostic com gate local para secrets.
 
-As lacunas estão agrupadas abaixo. P0 e P1 estão implementados; P2–P3 são o plano.
+As lacunas estão agrupadas abaixo. P0, P1 e a maior parte do P2 estão
+implementados; os itens restantes do P2 e o P3 são o plano.
 
 ## P0 — qualidade do sinal (feito)
 
@@ -155,7 +156,7 @@ e só cai para a árvore decompilada quando o parse nativo falha. Veja o
    campo para findings de semgrep/gitleaks, então “OkHttp menciona
    X509TrustManager” e “o app desativa validação de TLS” ficam distinguíveis.
 
-## P2 — cobertura
+## P2 — cobertura (quase concluído)
 
 - **Kotlin e taint.** (feito) O pack ganhou regras Kotlin (segredos
   hardcoded, `addJavascriptInterface`, log sensível, cifras fracas,
