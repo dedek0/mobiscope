@@ -26,11 +26,15 @@ Consequences of that split:
   + inventory` (+ implicit apksigner).
 - `analyze app.apk --stages apktool,jadx,gitleaks,semgrep` adds the scanners.
 - `analyze app.apk --stages inventory` runs only the in-process inventory
-  phase (no external binary).
+  phase (no external binary). It still reads the manifest, resources and DEX
+  straight from the APK, so it works on a fresh session directory with no
+  decompiled tree (`--quick` is meaningful for the same reason).
 - gitleaks/semgrep **never run by accident**, but also never run unless you
   ask — a "default" run has no scanner findings from them.
-- Unknown stage names are silently ignored (no error). Stage matching accepts
-  `-` and `_` interchangeably (`anti-analysis` == `anti_analysis`). On iOS the
+- Unknown stage names fail the run with the list of valid names for the
+  detected platform (a typo no longer silently skips a check). Stage matching
+  accepts `-` and `_` interchangeably (`anti-analysis` == `anti_analysis`).
+  On iOS the
   inventory phase must be requested as `inventory`, not `inventory-ios` — the
   trigger checks `NameInventory` only, while the recorded tool is named
   `inventory-ios`.
@@ -41,8 +45,9 @@ Consequences of that split:
   session directory — see *gitleaks/semgrep source directory* below.
 
 `--no-res` passes `-r` to apktool and `--no-res` to jadx (skips resource
-decoding; the manifest is still decoded, but NSC findings are lost with
-`res/`).
+decoding; the manifest is still decoded). The native inventory reader is not
+affected: it still reads `resources.arsc` and `res/xml/…` straight from the
+APK, so NSC findings survive `--no-res`.
 
 ## Pinned tool versions
 
@@ -134,22 +139,38 @@ Details and known gaps:
   `semgrep --validate --config internal/rules/mastg/rules.yaml`. The packs
   are embedded in the binary and materialized to a temp directory for
   semgrep.
-- **inventory** — reads `jadx/AndroidManifest.xml`, falling back to
-  `apktool/AndroidManifest.xml` and then the session root,
-  decodes it with `encoding/xml` (legacy regex fallback for non-XML),
-  resolves the network security config via
-  `android:networkSecurityConfig="@xml/…"`, then pattern-scans the tree with
-  `scanRules` (AWS/GCP/GitHub/Slack tokens, Azure connection strings, JWTs,
-  private keys, Firebase URLs, predictable IVs). Caps: extensions
+- **inventory** — reads the APK directly first: `AndroidManifest.xml` is
+  decoded from compiled binary XML (`internal/analyzers/axml.go`) and
+  `resources.arsc` is parsed (`arsc.go`) so resource references such as
+  `@xml/network_security_config` resolve without apktool. The decoded tree
+  (`jadx/` → `apktool/` → session root) is only a fallback when the native
+  parse fails (or when the caller has no APK). The manifest is then decoded
+  with `encoding/xml` from that XML (legacy regex fallback for non-XML).
+  Checks are `targetSdk`-aware: `android:exported` defaults, provider defaults,
+  pre-API-28 cleartext, App Links without `autoVerify`, singleTask /
+  singleInstance task affinity, `grant-uri-permission` children, and
+  `usesCleartextTraffic` defaults.
+  The network security config is fully parsed (`nsc.go`): base and per-domain
+  `cleartextTrafficPermitted`, `debug-overrides`, `overridePins`,
+  `pin-set`/`expiration`, and trust anchors. Only relaxations are findings;
+  the structured result also populates `inventory.network.exceptions`.
+  Every `classes*.dex` string pool is scanned with `scanRules` (AWS/GCP/
+  GitHub/Slack tokens, Azure connection strings, JWTs, private keys, Firebase
+  URLs, predictable IVs) plus the URL/IP/e-mail/pinning aggregates, so secrets
+  are found even when `jadx`/`semgrep` did not run or mangled the sources.
+  Caps: tree extensions
   `.java .smali .xml .kt .json .properties .cfg`, files <= 2 MiB
-  (`maxScanFileSize`), symlinks never followed.
+  (`maxScanFileSize`), DEX files <= 64 MiB and <= 500k strings, symlinks never
+  followed.
   Generic URLs (`url_count`/`urls`), IPs (`ip_count`/`ips`), e-mails
   (`email_count`/`emails`) and pinning markers
   (`pinning_indicators`/`pinning_count`) are aggregate inventory data, not
-  findings; pinning produces one informational finding per app. Private keys
-  require a complete PEM block with a valid base64 body, and the body is
-  redacted. Client-side identifiers (GCP API key, Google OAuth client ID,
-  Firebase URL) are `info`/`public`. Every finding sets `platform`.
+  findings; DEX aggregates are only merged when the tree scan produced none,
+  so a full run does not double-count. Pinning produces one informational
+  finding per app. Private keys require a complete PEM block with a valid
+  base64 body, and the body is redacted. Client-side identifiers (GCP API key,
+  Google OAuth client ID, Firebase URL) are `info`/`public`. Every finding sets
+  `platform` and `origin` (`app` or `sdk:<name>`).
 - **apksigner** — runs implicitly and is not selectable. Its findings
   (debug-signed, no signer, v1-only) are wired through
   `ConvertFindings`; `signing_cert_fp` and `signature_scheme` also land on
@@ -232,7 +253,7 @@ yet: no `dexdc` stage exists, and `jadx` remains the default.
 | Full Android report (default) | `apktool`, `jadx`, `elf`, `anti-analysis`, `repack`, `sdk`, `inventory` (+ implicit apksigner) |
 | Secrets from decompiled code | `jadx` **and** `gitleaks` (gitleaks alone scans a nearly empty dir) |
 | MASVS/MASTG rule matches | `jadx` **and** `semgrep` (needs a full source tree) |
-| Manifest/NSC findings only | `inventory` (works off `jadx/`, or a pre-seeded tree — `scripts/smoke.sh` does exactly that) |
+| Manifest/NSC findings only | `inventory` (reads the APK directly; a pre-seeded `jadx/` tree is only a fallback — `scripts/smoke.sh` also exercises that) |
 | Fast iOS pass | defaults; add `gitleaks,semgrep` to use the embedded iOS pack |
 | Signed-artifact facts | automatic on Android — no stage needed |
 

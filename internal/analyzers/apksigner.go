@@ -86,7 +86,7 @@ func (a *ApkSigner) Run(ctx context.Context, target string, workdir string) (mod
 		"signature_scheme": scheme,
 		"signing_cert_fp":  certFP,
 		"signer_count":     signerCount,
-		"debug_signed":     debug == "true" || strings.Contains(strings.ToLower(debug), "debug"),
+		"debug_signed":     debug == boolTrue || strings.Contains(strings.ToLower(debug), "debug"),
 	})
 	result.Output = raw
 	result.Duration = time.Since(start)
@@ -169,7 +169,7 @@ func parseApksignerOutput(out string) (scheme, certFP, signerCount, debug string
 			// One line per signer; the DN also carries the debug flag.
 			signers++
 			if strings.Contains(low, "debug") {
-				debug = "true"
+				debug = boolTrue
 			}
 		case strings.Contains(low, "sha-256 digest:"):
 			// Covers "Signer #1 certificate SHA-256 digest" and the older
@@ -298,46 +298,73 @@ func atoiSafe(s string) int {
 // AndroidManifestInfo is the subset of the decoded manifest used to populate
 // AppInventory.
 func AndroidManifestInfo(workdir string) models.AppInventory {
+	return androidManifestInfo("", workdir)
+}
+
+// AndroidManifestInfoForTarget reads the facts straight from the APK first and
+// only falls back to the decoded tree when the binary manifest cannot be
+// parsed.
+func AndroidManifestInfoForTarget(target, workdir string) models.AppInventory {
+	return androidManifestInfo(target, workdir)
+}
+
+func androidManifestInfo(target, workdir string) models.AppInventory {
 	info := models.AppInventory{}
-	manifestPath := ""
-	for _, dir := range []string{
-		filepath.Join(workdir, "jadx"),
-		filepath.Join(workdir, "apktool"),
-		workdir,
-	} {
-		candidate := filepath.Join(dir, AndroidManifestFile)
-		if fileExists(candidate) {
-			manifestPath = candidate
-			break
+	var m *androidManifest
+	var nsc *nscPolicy
+
+	if target != "" {
+		if a, err := openAPKArchive(target); err == nil {
+			m, _ = a.manifest()
+			if m != nil {
+				nsc, _, _ = nscPolicyFromAPK(a, m)
+			}
+			a.close()
 		}
 	}
-	if manifestPath == "" {
-		return info
+
+	if m == nil {
+		manifestPath := ""
+		for _, dir := range []string{
+			filepath.Join(workdir, "jadx"),
+			filepath.Join(workdir, "apktool"),
+			workdir,
+		} {
+			candidate := filepath.Join(dir, AndroidManifestFile)
+			if fileExists(candidate) {
+				manifestPath = candidate
+				break
+			}
+		}
+		if manifestPath == "" {
+			return info
+		}
+		data, err := readFileCapped(manifestPath, maxManifestBytes)
+		if err != nil {
+			return info
+		}
+		m, err = decodeManifest(data)
+		if err != nil {
+			return info
+		}
+		if nscAbs, _ := resolveNSCPath(filepath.Dir(manifestPath), m); nscAbs != "" {
+			if raw, err := readFileCapped(nscAbs, maxManifestBytes); err == nil {
+				nsc, _ = parseNSCPolicy(raw, nil)
+			}
+		}
 	}
-	data, err := readFileCapped(manifestPath, maxManifestBytes)
-	if err != nil {
-		return info
-	}
-	m, err := decodeManifest(data)
-	if err != nil {
-		return info
-	}
+
 	info.BundleID = m.Package
 	info.Permissions = m.permissions()
+	info.VersionName = normalizeResourceRef(m.VersionName)
+	info.VersionCode = m.VersionCode
+	info.MinOS = m.UsesSDK.MinSDKVersion
+	info.TargetSDK = m.UsesSDK.TargetSDKVersion
 	if strings.EqualFold(m.Application.Debuggable, "true") {
 		info.Debuggable = true
 	}
-
-	// Only claim a network security config when the manifest actually
-	// references one (or the conventional file exists next to it).
-	root := filepath.Dir(manifestPath)
-	if nscAbs, _ := resolveNSCPath(root, m); nscAbs != "" {
-		info.Network = models.NetworkPolicy{Kind: "network_security_config"}
-		if nsc, err := readFileCapped(nscAbs, maxManifestBytes); err == nil {
-			content := string(nsc)
-			info.Network.CleartextPermitted = strings.Contains(content, `cleartextTrafficPermitted="true"`)
-			info.Network.Pinned = strings.Contains(content, "<pin-set")
-		}
+	if nsc != nil {
+		info.Network = networkPolicyFromNSC(nsc)
 	}
 
 	// apktool.yml carries versionInfo/sdkInfo that the manifest does not.

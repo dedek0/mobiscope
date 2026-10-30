@@ -2,7 +2,9 @@
 
 Static analysis harness for **Android APKs** and **iOS IPAs**. It orchestrates
 external tools (apktool, jadx, gitleaks, semgrep and an iOS analyzer set) and
-uses LLMs to triage, correlate and explain security findings.
+uses LLMs to triage, correlate and explain security findings. Android facts
+(manifest, resources, DEX strings, signing identity) are also read in-process,
+so the core checks do not stop when a decompiler fails.
 
 > **Provider-agnostic**: Ollama, llama.cpp, LM Studio, vLLM, OpenAI,
 > Anthropic, Gemini, Groq, OpenRouter and any OpenAI-compatible API.

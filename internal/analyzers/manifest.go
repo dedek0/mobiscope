@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dedek0/mobiscope/internal/models"
 )
@@ -22,12 +21,32 @@ type androidManifest struct {
 	XMLName xml.Name `xml:"manifest"`
 	Package string   `xml:"package,attr"`
 
+	VersionName  string `xml:"versionName,attr"`
+	VersionCode  string `xml:"versionCode,attr"`
+	SharedUserID string `xml:"sharedUserId,attr"`
+
+	UsesSDK         usesSDK          `xml:"uses-sdk"`
 	Application     application      `xml:"application"`
 	UsesPermissions []usesPermission `xml:"uses-permission"`
 	UsesPermSDK23   []usesPermission `xml:"uses-permission-sdk-23"`
 	PermissionDecls []permissionDecl `xml:"permission"`
 	Queries         queries          `xml:"queries"`
-	SharedUserID    string           `xml:"sharedUserId,attr"`
+}
+
+// usesSDK carries the API-level range declared by <uses-sdk>.
+type usesSDK struct {
+	MinSDKVersion    string `xml:"minSdkVersion,attr"`
+	TargetSDKVersion string `xml:"targetSdkVersion,attr"`
+	MaxSDKVersion    string `xml:"maxSdkVersion,attr"`
+}
+
+// targetSDK returns the manifest's targetSdkVersion as an integer, or 0 when
+// it is absent or not numeric.
+func (m *androidManifest) targetSDK() int {
+	if m == nil {
+		return 0
+	}
+	return atoiSafe(strings.TrimSpace(m.UsesSDK.TargetSDKVersion))
 }
 
 // application holds the <application> element's attributes and components.
@@ -44,6 +63,7 @@ type application struct {
 	FullBackupContent     string      `xml:"fullBackupContent,attr"`
 	DataExtractionRules   string      `xml:"dataExtractionRules,attr"`
 	ExtractNativeLibs     string      `xml:"extractNativeLibs,attr"`
+	Permission            string      `xml:"permission,attr"`
 	Activities            []component `xml:"activity"`
 	ActivityAliases       []component `xml:"activity-alias"`
 	Services              []component `xml:"service"`
@@ -66,13 +86,19 @@ type component struct {
 	Priority      string         `xml:"priority,attr"`
 	AllowBackup   string         `xml:"allowBackup,attr"`
 	Multiprocess  string         `xml:"multiprocess,attr"`
+	LaunchMode    string         `xml:"launchMode,attr"`
+	TaskReparent  string         `xml:"allowTaskReparenting,attr"`
 	IntentFilters []intentFilter `xml:"intent-filter"`
+	// GrantURIChildren is set by a <grant-uri-permission> child element,
+	// which is equivalent to android:grantUriPermissions="true".
+	GrantURIChildren []struct{} `xml:"grant-uri-permission"`
 }
 
 type intentFilter struct {
 	Actions    []action   `xml:"action"`
 	Categories []category `xml:"category"`
 	Data       []dataElem `xml:"data"`
+	AutoVerify string     `xml:"autoVerify,attr"`
 }
 
 type action struct {
@@ -126,13 +152,38 @@ type parsedComponent struct {
 	DirectBoot       bool
 	Priority         int
 	AllowBackup      bool
+	LaunchMode       string
+	TaskReparent     bool
 	IntentFilters    []parsedIntentFilter
 }
 
 type parsedIntentFilter struct {
-	Actions []string
-	Schemes []string
-	Hosts   []string
+	Actions    []string
+	Categories []string
+	Schemes    []string
+	Hosts      []string
+	AutoVerify bool
+}
+
+// browsable reports whether the filter is reachable from a browser (the
+// android.intent.category.BROWSABLE category).
+func (f parsedIntentFilter) browsable() bool {
+	for _, c := range f.Categories {
+		if c == "android.intent.category.BROWSABLE" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAction reports whether the filter declares the given action.
+func (f parsedIntentFilter) hasAction(name string) bool {
+	for _, a := range f.Actions {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 // decodeManifest parses AndroidManifest.xml.
@@ -156,6 +207,11 @@ func (m *androidManifest) components() []parsedComponent {
 					pf.Actions = append(pf.Actions, a.Name)
 				}
 			}
+			for _, c := range f.Categories {
+				if c.Name != "" {
+					pf.Categories = append(pf.Categories, c.Name)
+				}
+			}
 			for _, d := range f.Data {
 				if d.Scheme != "" {
 					pf.Schemes = append(pf.Schemes, d.Scheme)
@@ -164,6 +220,7 @@ func (m *androidManifest) components() []parsedComponent {
 					pf.Hosts = append(pf.Hosts, d.Host)
 				}
 			}
+			pf.AutoVerify = strings.EqualFold(f.AutoVerify, "true")
 			if len(pf.Actions) > 0 || len(pf.Schemes) > 0 {
 				filters = append(filters, pf)
 			}
@@ -175,7 +232,7 @@ func (m *androidManifest) components() []parsedComponent {
 			ExportedExplicit: c.Exported != "",
 			Protected:        c.Permission != "",
 			Process:          c.Process,
-			GrantURI:         strings.EqualFold(c.GrantURI, "true"),
+			GrantURI:         strings.EqualFold(c.GrantURI, "true") || len(c.GrantURIChildren) > 0,
 			Auth:             c.Authorities,
 			TaskAffinity:     c.TaskAffinity,
 			ReadPerm:         c.ReadPerm,
@@ -184,6 +241,8 @@ func (m *androidManifest) components() []parsedComponent {
 			DirectBoot:       strings.EqualFold(c.DirectBoot, "true"),
 			Priority:         atoiSafe(strings.TrimSpace(c.Priority)),
 			AllowBackup:      !strings.EqualFold(c.AllowBackup, "false"),
+			LaunchMode:       c.LaunchMode,
+			TaskReparent:     strings.EqualFold(c.TaskReparent, "true"),
 			IntentFilters:    filters,
 		})
 	}
@@ -266,8 +325,18 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 		return inv.analyzeManifestLegacy(string(data), sessionID)
 	}
 
+	return inv.manifestFindings(m, sessionID)
+}
+
+// manifestFindings applies the manifest checks to an already decoded manifest.
+// It is shared by the decoded-XML path and the in-process AXML path.
+func (inv *Inventory) manifestFindings(m *androidManifest, sessionID string) []models.Finding {
 	var findings []models.Finding
+	if m == nil {
+		return findings
+	}
 	app := m.Application
+	targetSDK := m.targetSDK()
 
 	if strings.EqualFold(app.Debuggable, "true") {
 		findings = append(findings, manifestFinding(sessionID,
@@ -297,6 +366,15 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 			"android:usesCleartextTraffic=\"true\"",
 			models.SeverityHigh, models.SensitivityConfidential, 1.0))
 	}
+	// Before targetSdk 28 the platform permits cleartext by default when the
+	// app neither sets the flag nor ships a network security config.
+	if app.UsesCleartextTraffic == "" && app.NetworkSecurityConfig == "" && targetSDK > 0 && targetSDK < 28 {
+		findings = append(findings, manifestFinding(sessionID,
+			"Cleartext traffic permitted by targetSdk default",
+			fmt.Sprintf("targetSdkVersion=%d predates the API 28 cleartext default, so HTTP is allowed unless a network security config narrows it.", targetSDK),
+			fmt.Sprintf("targetSdkVersion=%d (usesCleartextTraffic not set)", targetSDK),
+			models.SeverityMedium, models.SensitivityInternal, 0.7))
+	}
 
 	for _, comp := range m.components() {
 		if comp.Kind == componentKindProvider && comp.GrantURI {
@@ -315,8 +393,16 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 		}
 
 		// A component with an intent-filter and no explicit android:exported
-		// is implicitly exported on API levels below 31.
-		implicitlyExported := !comp.ExportedExplicit && len(comp.IntentFilters) > 0
+		// is implicitly exported on API levels below 31. From API 31 on the
+		// platform rejects such a manifest at install time, so reporting it
+		// as an exported surface would be a false positive.
+		implicitlyExported := !comp.ExportedExplicit && len(comp.IntentFilters) > 0 &&
+			(targetSDK == 0 || targetSDK < 31)
+		// <provider> has its own default: exported on API 16 and below,
+		// private from API 17 on, regardless of intent filters.
+		if !comp.ExportedExplicit && comp.Kind == componentKindProvider && targetSDK > 0 && targetSDK <= 16 {
+			implicitlyExported = true
+		}
 		if implicitlyExported && !comp.Protected {
 			findings = append(findings, manifestFinding(sessionID,
 				fmt.Sprintf("Implicitly exported %s: %s", comp.Kind, comp.Name),
@@ -339,6 +425,49 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 						comp.Name+" custom scheme=\""+scheme+"\"",
 						models.SeverityMedium, models.SensitivityInternal, 0.7))
 				}
+			}
+		}
+
+		// App Links: a https VIEW filter that is browsable but does not set
+		// android:autoVerify lets any app claim the same host.
+		if comp.Exported || implicitlyExported {
+			for _, filter := range comp.IntentFilters {
+				if !filter.hasAction("android.intent.action.VIEW") || !filter.browsable() {
+					continue
+				}
+				for _, host := range filter.Hosts {
+					if host == "" || host == "*" {
+						continue
+					}
+					hasHTTPS := false
+					for _, scheme := range filter.Schemes {
+						if scheme == "https" {
+							hasHTTPS = true
+						}
+					}
+					if !hasHTTPS || filter.AutoVerify {
+						continue
+					}
+					findings = append(findings, manifestFinding(sessionID,
+						fmt.Sprintf("App Link without autoVerify: %s", host),
+						fmt.Sprintf("%s handles https://%s but does not set android:autoVerify=\"true\", so any app can register the same host and receive the links.", comp.Name, host),
+						comp.Name+" autoVerify missing for "+host,
+						models.SeverityMedium, models.SensitivityInternal, 0.75))
+				}
+			}
+		}
+
+		// Task hijacking: a singleTask/singleInstance activity whose task can
+		// be adopted by another app lets an attacker show their activity in
+		// this app's task.
+		if comp.Kind == "activity" && (comp.LaunchMode == "singleTask" || comp.LaunchMode == "singleInstance") {
+			sameAffinity := comp.TaskAffinity == "" || (m.Package != "" && comp.TaskAffinity == m.Package)
+			if sameAffinity || comp.TaskReparent {
+				findings = append(findings, manifestFinding(sessionID,
+					fmt.Sprintf("Task hijacking surface: %s", comp.Name),
+					fmt.Sprintf("The activity uses launchMode=%s and %s, which lets a malicious app place its activity in this app's task.", comp.LaunchMode, taskAffinityReason(comp)),
+					comp.Name+" launchMode=\""+comp.LaunchMode+"\"",
+					models.SeverityMedium, models.SensitivityInternal, 0.7))
 			}
 		}
 
@@ -447,6 +576,18 @@ func (inv *Inventory) analyzeManifest(dir, sessionID string) []models.Finding {
 	return findings
 }
 
+// taskAffinityReason describes the affinity property that makes a task
+// hijacking finding applicable.
+func taskAffinityReason(c parsedComponent) string {
+	if c.TaskReparent {
+		return "allowTaskReparenting=\"true\""
+	}
+	if c.TaskAffinity == "" {
+		return "an empty taskAffinity (the package default)"
+	}
+	return "a taskAffinity equal to the package name"
+}
+
 func manifestFinding(sessionID, title, desc, snippet string, sev models.Severity, sens models.Sensitivity, conf float64) models.Finding {
 	return models.Finding{
 		ID:          models.GenerateID(NameInventory, models.CategoryManifestIssue, AndroidManifestFile, 1, snippet),
@@ -454,6 +595,7 @@ func manifestFinding(sessionID, title, desc, snippet string, sev models.Severity
 		SourceTool:  NameInventory,
 		Category:    models.CategoryManifestIssue,
 		Platform:    models.PlatformAndroid,
+		Origin:      OriginApp,
 		Title:       title,
 		Description: desc,
 		Evidence:    snippet,
@@ -517,98 +659,49 @@ func (inv *Inventory) analyzeNetworkSecurityConfig(dir, sessionID string) []mode
 	if err != nil {
 		return nil
 	}
-	content := string(raw)
-
-	var findings []models.Finding
-
-	if strings.Contains(content, `cleartextTrafficPermitted="true"`) {
-		findings = append(findings, nscFinding(sessionID, nscRel,
-			"Cleartext traffic permitted",
-			"The network security config allows cleartext (HTTP) traffic.",
-			`cleartextTrafficPermitted="true"`,
-			models.CategoryNetworkConfig, models.SeverityHigh, models.SensitivityConfidential, 1.0))
+	policy, err := parseNSCPolicy(raw, nil)
+	if err != nil {
+		return nil
 	}
-
-	// Only flag custom trust anchors (src="user" or src="@"); a stock
-	// <trust-anchors><certificates src="system"/></trust-anchors> is fine.
-	if hasCustomTrustAnchor(content) {
-		findings = append(findings, nscFinding(sessionID, nscRel,
-			"Custom trust anchors configured",
-			"Custom trust anchors (src=\"user\" or src=\"@\") may weaken TLS validation if misconfigured.",
-			"trust-anchors src=\"user\"",
-			models.CategoryNetworkConfig, models.SeverityMedium, models.SensitivityInternal, 0.8))
-	}
-
-	if strings.Contains(content, "overridePins=\"true\"") {
-		findings = append(findings, nscFinding(sessionID, nscRel,
-			"Certificate pinning override enabled",
-			"overridePins=\"true\" disables pin enforcement (typically debug builds); never ship it enabled.",
-			`overridePins="true"`,
-			models.CategoryNetworkConfig, models.SeverityHigh, models.SensitivityConfidential, 0.9))
-	}
-
-	if strings.Contains(content, "<pin-set") {
-		findings = append(findings, nscFinding(sessionID, nscRel,
-			"Certificate pinning configured (XML)",
-			"The app uses network_security_config pin-set for certificate pinning.",
-			"<pin-set>",
-			models.CategoryPinningIndicator, models.SeverityInfo, models.SensitivityPublic, 1.0))
-
-		// A pin set that expires stops protecting the app silently once
-		// the date passes.
-		if exp, ok := pinSetExpiration(content); ok {
-			if time.Now().After(exp) {
-				findings = append(findings, nscFinding(sessionID, nscRel,
-					"Certificate pin set has expired",
-					fmt.Sprintf("The pin-set expired on %s; the pinned keys are no longer enforced, so a new certificate is accepted without any code change.", exp.Format("2006-01-02")),
-					"expiration=\""+exp.Format("2006-01-02")+"\"",
-					models.CategoryNetworkConfig, models.SeverityHigh, models.SensitivityConfidential, 0.9))
-			}
-		} else {
-			findings = append(findings, nscFinding(sessionID, nscRel,
-				"Certificate pin set has no expiration",
-				"The pin-set declares no expiration date, so the pins stay in force forever and a leaked key cannot be rotated out of the app.",
-				"<pin-set> without expiration",
-				models.CategoryPinningIndicator, models.SeverityInfo, models.SensitivityPublic, 0.8))
-		}
-	}
-
-	return findings
+	inv.network = networkPolicyFromNSC(policy)
+	inv.hasNet = true
+	return nscFindings(policy, sessionID, nscRel)
 }
 
-// pinSetExpiration extracts the expiration date of the first pin-set in a
-// network security config.
-func pinSetExpiration(content string) (time.Time, bool) {
-	idx := strings.Index(content, "<pin-set")
-	if idx < 0 {
-		return time.Time{}, false
+// nscFindingsFromAPK reads the network security config named by the manifest
+// straight out of the APK, including the compiled binary-XML form.
+func nscFindingsFromAPK(a *apkArchive, m *androidManifest, sessionID string) ([]models.Finding, models.NetworkPolicy, bool) {
+	policy, file, ok := nscPolicyFromAPK(a, m)
+	if !ok {
+		return nil, models.NetworkPolicy{}, false
 	}
-	rest := content[idx:]
-	end := strings.Index(rest, ">")
-	if end < 0 {
-		return time.Time{}, false
+	return nscFindings(policy, sessionID, file), networkPolicyFromNSC(policy), true
+}
+
+// nscPolicyFromAPK locates and parses the network security config inside the
+// APK. It understands both the compiled binary-XML form and plain XML.
+func nscPolicyFromAPK(a *apkArchive, m *androidManifest) (*nscPolicy, string, bool) {
+	if a == nil {
+		return nil, "", false
 	}
-	tag := rest[:end]
-	attrIdx := strings.Index(tag, "expiration=")
-	if attrIdx < 0 {
-		return time.Time{}, false
+	candidates := []string{}
+	if name := nscResourceName(m); name != "" {
+		candidates = append(candidates, filepath.ToSlash(filepath.Join("res", "xml", name+".xml")))
 	}
-	rest = tag[attrIdx+len("expiration="):]
-	if len(rest) == 0 || rest[0] != '"' {
-		return time.Time{}, false
-	}
-	rest = rest[1:]
-	closing := strings.IndexByte(rest, '"')
-	if closing < 0 {
-		return time.Time{}, false
-	}
-	value := rest[:closing]
-	for _, layout := range []string{"2006-01-02", "2006-01-02T15:04:05Z07:00", time.RFC3339} {
-		if t, err := time.Parse(layout, value); err == nil {
-			return t, true
+	candidates = append(candidates, NetworkSecurityConfigFile)
+
+	for _, rel := range candidates {
+		raw, ok := a.file(rel, maxManifestBytes)
+		if !ok {
+			continue
 		}
+		policy, err := parseNSCPolicy(raw, a.resolve)
+		if err != nil {
+			continue
+		}
+		return policy, rel, true
 	}
-	return time.Time{}, false
+	return nil, "", false
 }
 
 func nscFinding(sessionID, file, title, desc, snippet string, cat models.Category, sev models.Severity, sens models.Sensitivity, conf float64) models.Finding {
@@ -618,6 +711,7 @@ func nscFinding(sessionID, file, title, desc, snippet string, cat models.Categor
 		SourceTool:  NameInventory,
 		Category:    cat,
 		Platform:    models.PlatformAndroid,
+		Origin:      OriginApp,
 		Title:       title,
 		Description: desc,
 		Evidence:    snippet,

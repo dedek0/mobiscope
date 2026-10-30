@@ -100,6 +100,21 @@ func withStubPATH(t *testing.T, dir string) {
 	})
 }
 
+func TestValidateStages(t *testing.T) {
+	assert.NoError(t, validateStages(nil, models.PlatformAndroid))
+	assert.NoError(t, validateStages([]string{"anti-analysis", "inventory"}, models.PlatformAndroid))
+	assert.NoError(t, validateStages([]string{"anti_analysis"}, models.PlatformAndroid))
+
+	err := validateStages([]string{"anti-anlaysis"}, models.PlatformAndroid)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown stage")
+	assert.Contains(t, err.Error(), "anti-anlaysis")
+	assert.Contains(t, err.Error(), "inventory")
+
+	assert.NoError(t, validateStages([]string{"ipa-extract", "macho"}, models.PlatformIOS))
+	require.Error(t, validateStages([]string{"apktool"}, models.PlatformIOS))
+}
+
 // --- buildAnalyzers (cmd coverage) ---
 
 func TestBuildAnalyzers_AndroidDefaults(t *testing.T) {

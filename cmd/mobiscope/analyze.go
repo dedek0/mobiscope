@@ -216,6 +216,10 @@ func analyzeOne(c *cobra.Command, apkPath, workdir string, stageFilter []string,
 		"format", target.Format,
 	)
 
+	if err := validateStages(stageFilter, target.Platform); err != nil {
+		return nil, err
+	}
+
 	// Chain-of-custody gate: verify the expected hash before any tool runs.
 	if tf.expectSHA != "" {
 		got, err := utils.Sha256File(apkPath)
@@ -395,11 +399,54 @@ type stageOptions struct {
 	expectCert string
 }
 
+const (
+	stageGitleaks = "gitleaks"
+	stageSemgrep  = "semgrep"
+)
+
 // optInStages are the optional scanners. They never run on a default pass:
 // the operator has to name them in --stages.
 var optInStages = map[string]bool{
-	"gitleaks": true,
-	"semgrep":  true,
+	stageGitleaks: true,
+	stageSemgrep:  true,
+}
+
+// androidStages and iosStages are the names accepted by --stages. The list is
+// deliberately explicit: a typo must fail instead of silently producing a
+// report that skipped a check.
+var (
+	androidStages = []string{
+		"apktool", "jadx", "apksigner", "elf", "anti-analysis", "repack",
+		"sdk", stageGitleaks, stageSemgrep, "inventory",
+	}
+	iosStages = []string{
+		"ipa-extract", "plist", "macho", "codesign", "classdump", "strings",
+		stageGitleaks, stageSemgrep, "inventory",
+	}
+)
+
+// validateStages rejects unknown --stages entries and lists the valid names
+// for the detected platform.
+func validateStages(stages []string, plat models.Platform) error {
+	valid := androidStages
+	if plat == models.PlatformIOS {
+		valid = iosStages
+	}
+	known := make(map[string]bool, len(valid))
+	for _, name := range valid {
+		known[stageKey(name)] = true
+	}
+	var unknown []string
+	for _, name := range stages {
+		if !known[stageKey(name)] {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unknown stage(s) for %s: %s (valid: %s)",
+		plat, strings.Join(unknown, ", "), strings.Join(valid, ", "))
 }
 
 // stageEnabled reports whether a stage runs, honouring the explicit filter
@@ -410,7 +457,7 @@ func (o stageOptions) stageEnabled(name string) bool {
 	if o.quick && optInStages[name] {
 		return false
 	}
-	if o.noSecrets && name == "gitleaks" {
+	if o.noSecrets && name == stageGitleaks {
 		return false
 	}
 	if name == "apksigner" {
@@ -471,10 +518,10 @@ func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Anal
 		if opts.stageEnabled("strings") {
 			list = append(list, analyzers.NewStrings())
 		}
-		if opts.stageEnabled("gitleaks") {
+		if opts.stageEnabled(stageGitleaks) {
 			list = append(list, analyzers.NewGitleaks())
 		}
-		if opts.stageEnabled("semgrep") {
+		if opts.stageEnabled(stageSemgrep) {
 			list = append(list, analyzers.NewSemgrep(rulePackPath(opts.rules, rules.PackIOS)))
 		}
 		return list
@@ -509,10 +556,10 @@ func buildAnalyzers(opts stageOptions, target *platform.Target) []analyzers.Anal
 	if opts.stageEnabled("sdk") {
 		list = append(list, analyzers.NewSDK())
 	}
-	if opts.stageEnabled("gitleaks") {
+	if opts.stageEnabled(stageGitleaks) {
 		list = append(list, analyzers.NewGitleaks())
 	}
-	if opts.stageEnabled("semgrep") {
+	if opts.stageEnabled(stageSemgrep) {
 		list = append(list, analyzers.NewSemgrep(rulePackPath(opts.rules, rules.PackAndroid)))
 	}
 	return list

@@ -299,7 +299,7 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	var scanAgg analyzers.ScanAggregate
 	if ctx.Err() == nil && p.shouldRunInventory(stages) {
 		invStart := time.Now()
-		invFindings, agg := p.runInventory(plat, sessionDir, session.ID)
+		invFindings, agg := p.runInventory(plat, apkPath, sessionDir, session.ID)
 		scanAgg = agg
 		session.Findings = append(session.Findings, invFindings...)
 		invDur := time.Since(invStart)
@@ -322,6 +322,14 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 		})
 	}
 
+	// Attribute each finding to the app or to a bundled SDK. Analyzers that
+	// already know the origin (manifest, inventory) keep their value.
+	for i := range session.Findings {
+		if session.Findings[i].Origin == "" {
+			session.Findings[i].Origin = analyzers.OriginForPath(session.Findings[i].Location.File)
+		}
+	}
+
 	// Phase 4: dedup.
 	session.Findings = Dedup(session.Findings)
 	p.logger.Info("dedup complete", "findings", len(session.Findings))
@@ -335,7 +343,7 @@ func (p *Pipeline) Run(ctx context.Context, apkPath string, workdir string, stag
 	report.SortFindingsBySeverity(session.Findings)
 
 	// Phase 3b: inventory.json with structured app facts.
-	session.App = p.collectAppInventory(plat, sessionDir, runs)
+	session.App = p.collectAppInventory(plat, apkPath, sessionDir, runs)
 	session.App.URLCount = scanAgg.URLs.Count
 	session.App.URLs = scanAgg.URLs.URLs
 	session.App.IPCount = scanAgg.IPCount
@@ -562,11 +570,11 @@ func persistSarif(path string, session *models.AnalysisSession) error {
 }
 
 // collectAppInventory gathers structured app facts for inventory.json.
-func (p *Pipeline) collectAppInventory(plat models.Platform, sessionDir string, runs []analyzerRun) models.AppInventory {
+func (p *Pipeline) collectAppInventory(plat models.Platform, apkPath, sessionDir string, runs []analyzerRun) models.AppInventory {
 	if plat == models.PlatformIOS {
 		return analyzers.IOSAppInfo(sessionDir)
 	}
-	inv := analyzers.AndroidManifestInfo(sessionDir)
+	inv := analyzers.AndroidManifestInfoForTarget(apkPath, sessionDir)
 	var toolResults []models.ToolResult
 	for _, r := range runs {
 		toolResults = append(toolResults, r.tool)
@@ -601,12 +609,12 @@ func (p *Pipeline) collectSigning(plat models.Platform, apkPath string, runs []a
 
 // runInventory dispatches to the platform-appropriate inventory analyzer and
 // returns its findings plus the Android scan aggregate (zero on iOS).
-func (p *Pipeline) runInventory(plat models.Platform, sessionDir, sessionID string) ([]models.Finding, analyzers.ScanAggregate) {
+func (p *Pipeline) runInventory(plat models.Platform, apkPath, sessionDir, sessionID string) ([]models.Finding, analyzers.ScanAggregate) {
 	if plat == models.PlatformIOS {
 		return analyzers.NewInventoryIOS().Analyze(sessionDir, sessionID), analyzers.ScanAggregate{}
 	}
 	inv := analyzers.NewInventory()
-	findings := inv.Analyze(sessionDir, sessionID)
+	findings := inv.AnalyzeTarget(apkPath, sessionDir, sessionID)
 	return findings, inv.Aggregate()
 }
 

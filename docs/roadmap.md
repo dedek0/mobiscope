@@ -35,7 +35,7 @@ Known strengths:
 - Deterministic findings, dedup/clustering, SARIF and Markdown output.
 - Provider-agnostic LLM triage with a local secret gate.
 
-Known gaps are grouped below. P0 is implemented; P1–P3 are planned.
+Known gaps are grouped below. P0 and P1 are implemented; P2–P3 are planned.
 
 ## P0 — signal quality (done)
 
@@ -111,37 +111,50 @@ The Android pack now validates under `semgrep 1.127.1`
 - `network.kind` is only set when a network security config exists;
   `cleartext_permitted` and `pinned` are populated from it.
 
-## P1 — Android-native analysis
+## P1 — Android-native analysis (done)
 
 Goal: make the core checks independent of `apktool`/`jadx` and fast enough for
-CI.
+CI. The inventory stage now reads the APK in-process and only falls back to the
+decoded tree when the native parse fails. See
+[ADR-010](adr/010-native-apk-parsing.md).
 
-1. **AXML and `resources.arsc` parser in Go.**
-   Read the binary manifest and resources directly from the APK. This keeps
-   manifest/permission/NSC findings working when the decompilers fail (OOM on
-   large APKs) and makes `--quick` meaningful.
-2. **DEX string-table scanner.**
-   Extract the string pool from every `classes*.dex` and run the secret, URL,
-   IP, pinning and anti-analysis patterns over it. Closes the gap where
+1. **AXML and `resources.arsc` parser in Go.** (done)
+   `axml.go` decodes compiled binary XML (string pool, resource map, typed
+   values, namespaces, CDATA); `arsc.go` parses the resource table so
+   `@xml/…` / `@string/…` references resolve without apktool. `inventory`
+   reads `AndroidManifest.xml` and the network security config straight from
+   the APK, so manifest/permission/NSC findings survive a decompiler OOM and
+   `--stages inventory` works on a fresh session directory (`--quick` is
+   meaningful).
+2. **DEX string-table scanner.** (done)
+   Every `classes*.dex` string pool is scanned for secrets, URLs, IPs, e-mails,
+   pinning markers and the same code patterns as the tree. DEX hits are
+   deduplicated against tree hits by category + evidence, and DEX aggregates
+   are merged only when the tree produced none. This closes the gap where
    `semgrep` is opt-in and only sees `.java`.
-3. **Full network security config parse.**
-   Domain-scoped `cleartextTrafficPermitted`, `debug-overrides`,
-   `pin-set`/`expiration`, trust anchors → `inventory.network.exceptions` and
-   per-domain findings.
-4. **targetSdk-aware manifest checks.**
-   - `android:exported` defaults depend on `targetSdk` and component kind.
-   - App Links: missing `autoVerify` + host is a hijack risk; check
-     `assetlinks.json` when reachable.
-   - Task hijacking: combine `taskAffinity`, `launchMode` and
+3. **Full network security config parse.** (done)
+   `nsc.go` parses base and per-domain `cleartextTrafficPermitted`,
+   `debug-overrides`, `overridePins`, `pin-set`/`expiration` and trust anchors.
+   Only genuine relaxations become findings; the structured result fills
+   `inventory.network.exceptions`.
+4. **targetSdk-aware manifest checks.** (done, assetlinks deferred)
+   - `android:exported` / provider defaults depend on `targetSdk` and the
+     component kind; a missing attribute on targetSdk ≥ 31 is not reported as
+     exported (the platform rejects that manifest).
+   - App Links: a browsable `https` VIEW filter without `autoVerify` is
+     reported. Fetching `assetlinks.json` is intentionally left to a network
+     stage (`--osv` is still the only egress).
+   - Task hijacking combines `taskAffinity`, `launchMode` and
      `allowTaskReparenting`.
-   - `usesCleartextTraffic` default by `targetSdk`; application-level
-     `android:permission`; `<grant-uri-permission>`; provider defaults.
-   - Parse `dataExtractionRules`/`fullBackupContent` and flag sensitive
-     directories.
-5. **Finding origin.** Mark each finding as `app` or `sdk:<name>` using the
-   class prefixes the `sdk` stage already detects. This is the difference
-   between “OkHttp mentions X509TrustManager” and “the app disables TLS
-   validation”.
+   - `usesCleartextTraffic` default by `targetSdk`; `<grant-uri-permission>`
+     children; provider defaults.
+   - `dataExtractionRules`/`fullBackupContent` are surfaced; flagging sensitive
+     directories from the rules file is still a P2 refinement.
+5. **Finding origin.** (done)
+   `Finding.origin` is `app` or `sdk:<name>`, derived from the `sdk` class
+   prefixes mapped onto decompiled paths. The pipeline fills it for
+   semgrep/gitleaks findings, so “OkHttp mentions X509TrustManager” and “the
+   app disables TLS validation” are distinguishable in the report.
 
 ## P2 — coverage
 
@@ -162,8 +175,8 @@ CI.
 - **Diff, baseline and CI gate.** `mobiscope diff old.apk new.apk`,
   `--baseline`, `--fail-on <severity>` and a documented allowlist for known
   public identifiers and AndroidX components.
-- **Validate stage names.** An unknown `--stages` entry is currently ignored
-  silently; it should fail with the list of valid stages.
+- **Validate stage names.** (done) An unknown `--stages` entry now fails the
+  run with the valid names for the detected platform.
 
 ## P3 — performance and reporting
 
@@ -250,8 +263,9 @@ result is the decision input.
 ## Suggested order
 
 1. P0 (done) — make the report readable.
-2. P1.1/1.2/1.5 — native manifest/DEX parsing and finding origin.
+2. P1 (done) — native manifest/DEX parsing, full NSC, targetSdk checks and
+   finding origin.
 3. P2 diff/baseline/CI gate — make the tool usable in a pipeline.
-4. P2 Kotlin/taint and signing in Go.
+4. P2 Kotlin/taint, signing in Go and expanded SDK detection.
 5. Decompiler backend evaluation, then `--fast`.
 6. P3 performance/reporting.

@@ -36,7 +36,7 @@ Pontos fortes:
 - Findings determinísticos, dedup/clustering, SARIF e Markdown.
 - Triage por LLM provider-agnostic com gate local para secrets.
 
-As lacunas estão agrupadas abaixo. O P0 está implementado; P1–P3 são o plano.
+As lacunas estão agrupadas abaixo. P0 e P1 estão implementados; P2–P3 são o plano.
 
 ## P0 — qualidade do sinal (feito)
 
@@ -111,36 +111,49 @@ O pack Android agora valida no `semgrep 1.127.1`
 - `network.kind` só é preenchido quando existe network security config;
   `cleartext_permitted` e `pinned` vêm dela.
 
-## P1 — análise Android nativa
+## P1 — análise Android nativa (feito)
 
 Objetivo: tornar os checks principais independentes de `apktool`/`jadx` e
-rápidos o suficiente para CI.
+rápidos o suficiente para CI. O estágio `inventory` agora lê o APK in-process
+e só cai para a árvore decompilada quando o parse nativo falha. Veja o
+[ADR-010](adr/010-native-apk-parsing.md).
 
-1. **Parser de AXML e `resources.arsc` em Go.**
-   Ler o manifest binário e os resources direto do APK. Mantém
-   manifest/permissões/NSC funcionando quando os decompiladores falham (OOM
-   em APK grande) e dá sentido ao `--quick`.
-2. **Scanner da string table dos DEX.**
-   Extrair a string pool de cada `classes*.dex` e rodar os padrões de secret,
-   URL, IP, pinning e anti-analysis. Fecha a lacuna de `semgrep` ser opt-in e
-   só ver `.java`.
-3. **Parse completo do network security config.**
-   `cleartextTrafficPermitted` por domínio, `debug-overrides`,
-   `pin-set`/`expiration`, trust anchors → `inventory.network.exceptions` e
-   findings por domínio.
-4. **Checks de manifest targetSdk-aware.**
-   - Defaults de `android:exported` dependem de `targetSdk` e do tipo.
-   - App Links: `autoVerify` ausente + host é risco de hijack; checar
-     `assetlinks.json` quando acessível.
-   - Task hijacking: combinar `taskAffinity`, `launchMode` e
+1. **Parser de AXML e `resources.arsc` em Go.** (feito)
+   `axml.go` decodifica XML binário compilado (string pool, resource map,
+   valores tipados, namespaces, CDATA); `arsc.go` lê a tabela de resources
+   para resolver `@xml/…` / `@string/…` sem apktool. O `inventory` lê
+   `AndroidManifest.xml` e o network security config direto do APK, então
+   manifest/permissões/NSC sobrevivem a OOM do decompilador e
+   `--stages inventory` funciona em sessão nova (`--quick` ganha sentido).
+2. **Scanner da string table dos DEX.** (feito)
+   Cada `classes*.dex` tem a string pool varrida por secrets, URLs, IPs,
+   e-mails, pinning e os mesmos padrões de código da árvore. Hits de DEX são
+   deduplicados contra a árvore por categoria + evidência, e agregados DEX só
+   entram quando a árvore não produziu nenhum. Fecha a lacuna de `semgrep`
+   ser opt-in e só ver `.java`.
+3. **Parse completo do network security config.** (feito)
+   `nsc.go` lê `cleartextTrafficPermitted` base e por domínio,
+   `debug-overrides`, `overridePins`, `pin-set`/`expiration` e trust anchors.
+   Só relaxamentos reais viram finding; o resultado estruturado preenche
+   `inventory.network.exceptions`.
+4. **Checks de manifest targetSdk-aware.** (feito; assetlinks adiado)
+   - Defaults de `android:exported`/provider dependem de `targetSdk` e do
+     tipo; atributo ausente em targetSdk ≥ 31 não é reportado como exportado
+     (a plataforma rejeita esse manifest).
+   - App Links: filtro VIEW `https` browsable sem `autoVerify` é reportado.
+     Buscar `assetlinks.json` fica para um estágio de rede (`--osv` continua
+     sendo o único egress).
+   - Task hijacking combina `taskAffinity`, `launchMode` e
      `allowTaskReparenting`.
-   - Default de `usesCleartextTraffic` por `targetSdk`; `android:permission`
-     no application; `<grant-uri-permission>`; defaults de provider.
-   - Parse de `dataExtractionRules`/`fullBackupContent` e sinalização de
-     diretórios sensíveis.
-5. **Origem do finding.** Marcar cada finding como `app` ou `sdk:<nome>` usando
-   os prefixos que o estágio `sdk` já detecta. É a diferença entre “OkHttp
-   menciona X509TrustManager” e “o app desativa validação de TLS”.
+   - Default de `usesCleartextTraffic` por `targetSdk`; filhos
+     `<grant-uri-permission>`; defaults de provider.
+   - `dataExtractionRules`/`fullBackupContent` são expostos; sinalizar
+     diretórios sensíveis a partir do arquivo de regras fica para o P2.
+5. **Origem do finding.** (feito)
+   `Finding.origin` é `app` ou `sdk:<nome>`, derivado dos prefixos de classe
+   do estágio `sdk` mapeados nos caminhos decompilados. O pipeline preenche o
+   campo para findings de semgrep/gitleaks, então “OkHttp menciona
+   X509TrustManager” e “o app desativa validação de TLS” ficam distinguíveis.
 
 ## P2 — cobertura
 
@@ -162,8 +175,8 @@ rápidos o suficiente para CI.
 - **Diff, baseline e gate de CI.** `mobiscope diff old.apk new.apk`,
   `--baseline`, `--fail-on <severity>` e allowlist documentada para
   identificadores públicos conhecidos e componentes AndroidX.
-- **Validar nomes de estágio.** Um `--stages` inválido hoje é ignorado em
-  silêncio; deve falhar listando os válidos.
+- **Validar nomes de estágio.** (feito) Um `--stages` inválido agora falha
+  listando os nomes válidos para a plataforma detectada.
 
 ## P3 — performance e relatório
 
@@ -250,8 +263,9 @@ entrada da decisão.
 ## Ordem sugerida
 
 1. P0 (feito) — tornar o relatório legível.
-2. P1.1/1.2/1.5 — parse nativo de manifest/DEX e origem do finding.
+2. P1 (feito) — parse nativo de manifest/DEX, NSC completo, checks de
+   targetSdk e origem do finding.
 3. P2 diff/baseline/gate de CI — tornar a ferramenta usável em pipeline.
-4. P2 Kotlin/taint e assinatura em Go.
+4. P2 Kotlin/taint, assinatura em Go e detecção de SDK ampliada.
 5. Avaliação do backend de decompilação, depois `--fast`.
 6. P3 performance/relatório.

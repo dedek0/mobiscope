@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root/emulator/anti-debug/instrumentation markers), `repack` (unexpected
   certificate, executable/native payloads in assets) and `sdk` (third-party
   library inventory). They run directly on the APK, without a decompiler.
+- Native AXML and `resources.arsc` parsers: `inventory` reads the binary
+  manifest, resource references and the network security config straight
+  from the APK, and only falls back to the decompiled tree when that fails.
+- DEX string-pool scanner: secrets, URLs, IPs, e-mails, pinning and code
+  patterns are found without `jadx`/`semgrep`, with duplicates against the
+  tree removed.
+- Full network security config parse (per-domain cleartext, debug overrides,
+  pin-set expiration, trust anchors) feeding `inventory.network.exceptions`.
+- `targetSdk`-aware manifest checks: exported/provider defaults, App Links
+  without `autoVerify`, task hijacking, pre-API-28 cleartext and
+  `<grant-uri-permission>`.
+- `Finding.origin` (`app` / `sdk:<name>`) attributes each finding to the app
+  or to a bundled third-party library.
+- `--stages` validation: an unknown stage now fails with the list of valid
+  names instead of silently running nothing.
 - `analyze --expect-cert <hex>` flags a signing certificate that does not
   match the expected fingerprint.
 - `analyze --osv` looks the detected libraries up in OSV.dev (opt-in; the

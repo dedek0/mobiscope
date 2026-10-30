@@ -140,6 +140,12 @@ type Finding struct {
 	Sensitivity Sensitivity `json:"sensitivity"      validate:"required"`
 	Confidence  float64     `json:"confidence,omitempty"`
 
+	// Origin identifies who owns the code a finding points at: "app" for
+	// the application itself or "sdk:<name>" when the location belongs to a
+	// bundled third-party library. It is empty when the source could not be
+	// attributed.
+	Origin string `json:"origin,omitempty"`
+
 	// Standards and taxonomy mapping (shared by Android and iOS findings).
 	Platform Platform          `json:"platform,omitempty"`
 	RuleID   string            `json:"rule_id,omitempty"`

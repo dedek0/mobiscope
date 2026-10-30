@@ -71,6 +71,7 @@ file, then line (`report.SortFindingsBySeverity`). Empty runs produce `[]`.
 | `sensitivity` | enum | `public`, `internal`, `confidential`, `secret` |
 | `confidence` | float | 0..1, omitted when `0` |
 | `platform` | enum | `android` / `ios` / `unknown`. Set by every iOS converter and by all Android converters (manifest, NSC, inventory pattern scan, ELF, anti-analysis, repack, SDK, apksigner). `session.platform` is authoritative |
+| `origin` | string | `app` when the location belongs to the application, `sdk:<name>` when it belongs to a bundled library detected by the `sdk` stage. Manifest/NSC findings are always `app`; source-tree findings are attributed by path; the pipeline fills the field for semgrep/gitleaks findings |
 | `rule_id` | string | Semgrep rule ID only |
 | `masvs`, `mastg` | []string | From semgrep rule metadata surfaced in SARIF `rule.properties` |
 | `maswe`, `cwe` | []string | Schema-reserved: the converter can read `cwe` from rule metadata, but no shipped rule pack declares `cwe`/`maswe` today |
