@@ -123,7 +123,7 @@ smoke-prints `gitleaks version`, `apktool --version`, `jadx --version`,
 |-------|-------|---------|-----------|--------------|-----------|
 | `apktool` | `apktool d -f -o <dir> [-r] -- <apk>` | 10 min | `apktool/` (decoded `AndroidManifest.xml`, `res/`, `apktool.yml`) | none directly — feeds inventory | opt-in (or `--decompiler`) |
 | `jadx` | `jadx --threads-count N -d <dir> [--no-res] -- <apk>` | 15 min | `jadx/` (sources + manifest) | none directly — feeds gitleaks/semgrep/inventory/triage context | default tree producer |
-| `dexdc` | `dex-decompile -i <apk> -d <dir> [--deobf] [--exclude <pkg>]` | 15 min | `dexdc/` (Java-like package tree) | none directly — feeds gitleaks/semgrep/inventory/triage context | opt-in (`--decompiler dexdc`) |
+| `dexdc` | `dex-decompile -i <apk> -d <dir> [--deobf] --exclude <pkg>...` | 15 min | `dexdc/` (Java-like package tree) | none directly — feeds gitleaks/semgrep/inventory/triage context | opt-in (`--decompiler dexdc`) |
 | `elf` | in-process (no binary) | none | fills `inventory.json.native_libs` | `binary_hardening`, `native_code`, `obfuscation` | default |
 | `anti-analysis` | in-process (no binary) | none | — | `anti_analysis`, `obfuscation` | default |
 | `repack` | in-process (no binary) | none | — | `manifest_issue` (repackaging) | default |
@@ -319,9 +319,12 @@ and is selected explicitly:
 
 `--decompiler` accepts `apktool`, `jadx`, `dexdc`, the historical `both`
 (`apktool+jadx`) or a comma-separated list. `dexdc` is fail-soft: a missing
-binary becomes a failed stage and the run continues. `SourceRoot` resolves
-`jadx → apktool → dexdc → session root`, so a `jadx,dexdc` run scans the jadx
-reference tree; each backend is evaluated in its own workdir.
+binary becomes a failed stage and the run continues. By default it excludes
+framework/vendor prefixes (`android.`, `androidx.`, `kotlin.`, `com.google.*`,
+OkHttp, Bouncy Castle, …) because the native/DEX scanners already cover their
+literals and a full tree of a very large APK is memory-hungry. `SourceRoot`
+resolves `jadx → apktool → dexdc → session root`, so a `jadx,dexdc` run scans
+the jadx reference tree; each backend is evaluated in its own workdir.
 
 Differential evaluation is manual, not part of `go test`:
 

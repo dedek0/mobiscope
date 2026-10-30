@@ -73,7 +73,7 @@ func (a *JADX) Run(ctx context.Context, target string, workdir string) (models.T
 	if a.cfg.NoRes {
 		args = append(args, "--no-res")
 	}
-	args = append(args, "--", target)
+	args = append(args, target)
 
 	cmdResult, err := a.runner.Run(ctx, jadxBinary, args, jadxTimeout, nil)
 	result.Duration = time.Since(start)

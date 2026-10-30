@@ -247,8 +247,8 @@ func TestBuildAnalyzers_NoResPropagation(t *testing.T) {
 			} else {
 				assert.NotContains(t, apktoolLine, " -r ")
 			}
-			// Target is always passed after --.
-			assert.Contains(t, jadxLine, "-- app.apk")
+			// jadx takes the target directly; apktool keeps the -- guard.
+			assert.Contains(t, jadxLine, " app.apk")
 			assert.Contains(t, apktoolLine, "-- app.apk")
 		})
 	}

@@ -291,6 +291,9 @@ result is the decision input.
 - Both the decompiler and its security scanners are young (0.1.x); output and
   rule semantics can change. Pin an exact commit and keep `jadx` available.
 - Pseudocode that semgrep cannot parse produces silent false negatives.
+- Full-tree export can exceed the 1 GB/30 s gate on very large APKs; the
+  default excludes framework/vendor packages, but `--fast` stays blocked
+  until the differential run passes within budget.
 - Taint engines can report false positives and, worse, false negatives; treat
   their output as an additional source with its own confidence.
 - New backends can change file/line locations and therefore deterministic

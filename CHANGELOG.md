@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output tree; `SourceRoot` resolves it after jadx/apktool.
 - `scripts/evaluate-decompiler.py` runs the ADR-009 differential evaluation
   (time, RSS, recall, fingerprint overlap, semgrep errors, acceptance checks).
+- jadx no longer receives a `--` separator before the input: jadx 1.5.1 treats
+  it as a command separator and rejects every APK. `dexdc` excludes framework
+  and large vendor packages by default to keep the optional tree within
+  memory.
 - CI gate: `analyze --fail-on <severity>` exits with code 2 on matching
   findings; `--baseline <findings.json|session.json>` suppresses known ones
   before triage.

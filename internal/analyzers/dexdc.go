@@ -24,6 +24,28 @@ type DEXDCConfig struct {
 	Excludes []string
 }
 
+// defaultDEXDCExcludes keep the optional backend from decompiling framework
+// and large vendor trees. The native inventory/DEX scanners already cover
+// their strings, and a full tree of a large APK can exceed the memory budget.
+var defaultDEXDCExcludes = []string{
+	"android.",
+	"androidx.",
+	"kotlin.",
+	"kotlinx.",
+	"com.google.android.",
+	"com.google.firebase.",
+	"com.google.gson.",
+	"com.google.common.",
+	"com.facebook.",
+	"okhttp3.",
+	"okio.",
+	"retrofit2.",
+	"org.apache.",
+	"org.bouncycastle.",
+	"io.reactivex.",
+	"io.sentry.",
+}
+
 // DEXDC wraps androguard/dex-decompiler. It is an optional decompiler: when
 // the binary is missing the stage records an error and the pipeline continues.
 // jadx remains the reference backend.
@@ -61,7 +83,11 @@ func (d *DEXDC) Run(ctx context.Context, target string, workdir string) (models.
 	if d.cfg.Deobf {
 		args = append(args, "--deobf")
 	}
-	for _, exclude := range d.cfg.Excludes {
+	excludes := d.cfg.Excludes
+	if excludes == nil {
+		excludes = defaultDEXDCExcludes
+	}
+	for _, exclude := range excludes {
 		args = append(args, "--exclude", exclude)
 	}
 

@@ -28,6 +28,9 @@ func TestJADX_Run_Success(t *testing.T) {
 	assert.Len(t, runner.Calls, 1)
 	assert.Equal(t, "jadx", runner.Calls[0].Name)
 	assert.NotContains(t, runner.Calls[0].Args, "--no-res")
+	// jadx 1.5.1 treats `--` as a command separator and rejects the input.
+	assert.NotContains(t, runner.Calls[0].Args, "--")
+	assert.Equal(t, "test.apk", runner.Calls[0].Args[len(runner.Calls[0].Args)-1])
 }
 
 func TestJADX_Run_WithNoRes(t *testing.T) {

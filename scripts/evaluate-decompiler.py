@@ -146,11 +146,7 @@ def run_backend(binary: str, backend: str, apk: str, base: Path, stages: str) ->
     stage_list = [s for s in stages.split(",") if s]
     if backend not in stage_list:
         stage_list.insert(0, backend)
-    cmd = [
-        "/usr/bin/time",
-        "-v",
-        "-o",
-        str(timefile),
+    analyze_cmd = [
         binary,
         "analyze",
         apk,
@@ -161,12 +157,18 @@ def run_backend(binary: str, backend: str, apk: str, base: Path, stages: str) ->
         "--stages",
         ",".join(stage_list),
     ]
+    has_gnu_time = Path("/usr/bin/time").is_file()
+    cmd = (
+        ["/usr/bin/time", "-v", "-o", str(timefile)] + analyze_cmd
+        if has_gnu_time
+        else analyze_cmd
+    )
     start = time.monotonic()
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     elapsed = round(time.monotonic() - start, 3)
 
     session, findings = load_session(outdir)
-    metrics = parse_time(timefile)
+    metrics = parse_time(timefile) if has_gnu_time else {"elapsed_seconds": None, "peak_rss_mb": None}
     if metrics["elapsed_seconds"] is None:
         metrics["elapsed_seconds"] = elapsed
     tool = "jadx" if backend == "jadx" else "dexdc"
@@ -210,10 +212,12 @@ def main() -> int:
     if not Path(args.apk).is_file():
         print(f"artifact not found: {args.apk}", file=sys.stderr)
         return 2
-    for binary in (args.binary, "jadx", "dex-decompile", "/usr/bin/time"):
+    for binary in (args.binary, "jadx", "dex-decompile"):
         if shutil.which(binary) is None and not Path(binary).is_file():
             print(f"required tool not found: {binary}", file=sys.stderr)
             return 2
+    if not Path("/usr/bin/time").is_file():
+        print("note: /usr/bin/time not found; RSS will be reported as null", file=sys.stderr)
 
     base = Path(args.workdir)
     base.mkdir(parents=True, exist_ok=True)

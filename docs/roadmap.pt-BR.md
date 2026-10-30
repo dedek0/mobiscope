@@ -290,6 +290,9 @@ entrada da decisão.
 - Tanto o decompilador quanto seus scanners são jovens (0.1.x); saída e
   semântica das regras podem mudar. Pine um commit exato e mantenha o `jadx`.
 - Pseudocódigo que o semgrep não parseia gera falso negativo silencioso.
+- Export de árvore completa pode estourar o gate de 1 GB/30 s em APKs muito
+  grandes; o padrão exclui pacotes de framework/vendor, mas o `--fast` fica
+  bloqueado até o run diferencial passar dentro do orçamento.
 - Taint engines podem ter falso positivo e, pior, falso negativo; trate a saída
   como fonte adicional com confiança própria.
 - Backend novo pode mudar arquivo/linha e, portanto, os IDs determinísticos.
